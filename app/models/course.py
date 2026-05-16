@@ -17,7 +17,7 @@ class Course(Base):
     professor_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), nullable=False)
     class_code: Mapped[str] = mapped_column(String(6), unique=True, nullable=False)
     semester: Mapped[str | None] = mapped_column(String(20))
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default="true")
     msg_window_start: Mapped[time] = mapped_column(Time, server_default="08:00:00")
     msg_window_end: Mapped[time] = mapped_column(Time, server_default="22:00:00")
     msg_timezone: Mapped[str] = mapped_column(String(50), server_default="America/New_York")
