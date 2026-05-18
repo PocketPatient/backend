@@ -15,7 +15,7 @@ class UserRole(str, Enum):
 
 class UserOut(BaseModel):
     id: uuid.UUID
-    netid: str
+    google_uid: str
     email: str
     role: UserRole
     display_name: str | None
