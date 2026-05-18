@@ -8,8 +8,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 
 | Method | Path | Description | Status |
 |--------|------|-------------|--------|
-| GET | `/api/v1/auth/cas/login` | Redirect to Rutgers CAS | Week 2 |
-| GET | `/api/v1/auth/cas/callback` | CAS callback, returns JWT | Week 2 |
+| POST | `/api/v1/auth/google` | Verify Firebase ID token, returns JWT | Week 2 |
 | POST | `/api/v1/auth/logout` | Invalidate session | Week 2 |
 
 ## Users
