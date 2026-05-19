@@ -17,7 +17,8 @@ class UserOut(BaseModel):
     id: uuid.UUID
     google_uid: str
     email: str
-    role: UserRole
+    role: UserRole | None
+    is_verified: bool | None
     display_name: str | None
     created_at: datetime
 
