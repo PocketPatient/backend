@@ -66,10 +66,12 @@ def test_verify_firebase_token_invalid_token_raises_401():
 # ── get_or_create_user ─────────────────────────────────────────────────────────
 
 async def test_get_or_create_user_creates_new():
-    db = AsyncMock()
+    db = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = None
     db.execute = AsyncMock(return_value=mock_result)
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
 
     firebase_data = {"uid": "new-uid", "email": "new@rutgers.edu", "name": "New User"}
     user = await get_or_create_user(db, firebase_data)
@@ -84,7 +86,7 @@ async def test_get_or_create_user_creates_new():
 
 async def test_get_or_create_user_returns_existing():
     existing = User(google_uid="existing-uid", email="existing@rutgers.edu")
-    db = AsyncMock()
+    db = MagicMock()
     mock_result = MagicMock()
     mock_result.scalar_one_or_none.return_value = existing
     db.execute = AsyncMock(return_value=mock_result)
@@ -113,6 +115,7 @@ def test_create_access_token_payload(rsa_keys):
     assert payload["sub"] == str(user.id)
     assert payload["email"] == "test@rutgers.edu"
     assert payload["role"] == "student"
+    assert "iat" in payload
 
 
 def test_create_access_token_null_role(rsa_keys):
@@ -185,4 +188,21 @@ async def test_verify_and_rotate_invalid_token_raises_401():
 
     with pytest.raises(HTTPException) as exc:
         await verify_and_rotate_refresh_token("bad-token", redis_mock, db)
+    assert exc.value.status_code == 401
+
+
+async def test_verify_and_rotate_user_deleted_raises_401():
+    user_id = uuid.uuid4()
+    raw_token = "b" * 64
+
+    redis_mock = AsyncMock()
+    redis_mock.get = AsyncMock(return_value=str(user_id))
+
+    db = MagicMock()
+    mock_result = MagicMock()
+    mock_result.scalar_one_or_none.return_value = None  # user was deleted
+    db.execute = AsyncMock(return_value=mock_result)
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_and_rotate_refresh_token(raw_token, redis_mock, db)
     assert exc.value.status_code == 401
