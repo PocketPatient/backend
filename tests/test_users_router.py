@@ -64,7 +64,9 @@ def test_set_role_student_succeeds():
     async def _override_user():
         return user
 
-    mock_db = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
 
     async def _override_db():
         yield mock_db
@@ -89,7 +91,9 @@ def test_set_role_professor_sets_is_verified_false():
     async def _override_user():
         return user
 
-    mock_db = AsyncMock()
+    mock_db = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.refresh = AsyncMock()
 
     async def _override_db():
         yield mock_db
