@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
+import asyncpg
 import pytest
 import pytest_asyncio
 from cryptography.hazmat.primitives import serialization
@@ -21,6 +22,9 @@ TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
     "postgresql+asyncpg://postgres:postgres@localhost:5432/pocketpatient_test",
 )
+
+# Raw DSN for asyncpg (strip the SQLAlchemy dialect prefix)
+_ASYNCPG_DSN = TEST_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
 
 _test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
 _TestSession = async_sessionmaker(_test_engine, expire_on_commit=False)
@@ -55,8 +59,11 @@ async def test_db():
 @pytest_asyncio.fixture
 async def db_session(test_db):
     """Direct DB session for fixture setup (inserting users, etc.)."""
-    async with _TestSession() as session:
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
         yield session
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture
@@ -67,8 +74,11 @@ async def client(rsa_keys, test_db):
     original_key = app_config.settings.jwt_public_key
     app_config.settings.jwt_public_key = public_pem
 
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+
     async def override_get_db():
-        async with _TestSession() as session:
+        async with session_factory() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
@@ -79,16 +89,24 @@ async def client(rsa_keys, test_db):
 
     app_config.settings.jwt_public_key = original_key
     app.dependency_overrides.clear()
+    await engine.dispose()
+
+
+async def _truncate_all():
+    """Open a fresh asyncpg connection (not pooled) to truncate tables."""
+    conn = await asyncpg.connect(_ASYNCPG_DSN)
+    try:
+        await conn.execute("TRUNCATE TABLE enrollments, courses, users CASCADE")
+    finally:
+        await conn.close()
 
 
 @pytest_asyncio.fixture
 async def clean_tables(test_db):
     """Truncate all data before and after each test. Request this fixture in test files."""
-    async with _test_engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE enrollments, courses, users CASCADE"))
+    await _truncate_all()
     yield
-    async with _test_engine.begin() as conn:
-        await conn.execute(text("TRUNCATE TABLE enrollments, courses, users CASCADE"))
+    await _truncate_all()
 
 
 def _make_token(user_id: uuid.UUID, private_pem: str) -> str:
