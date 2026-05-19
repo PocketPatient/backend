@@ -5,20 +5,35 @@ FastAPI backend for PocketPatient. Uses PostgreSQL, Redis, and Firebase Auth.
 ## Requirements
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/) — `brew install uv`
 - Docker (for local Postgres + Redis)
 
 ## Setup
 
+### 1. Create a virtual environment and install uv
+
 ```bash
-# Install dependencies
+python3 -m venv .venv
+source .venv/bin/activate
+pip install uv
+```
+
+### 2. Install project dependencies
+
+```bash
 uv sync
+```
 
-# Start Postgres and Redis
+### 3. Start Postgres and Redis
+
+```bash
 docker compose up -d
+```
 
-# Copy and fill in env vars
+### 4. Configure environment variables
+
+```bash
 cp .env.example .env
+# Fill in the values in .env
 ```
 
 ## Running
