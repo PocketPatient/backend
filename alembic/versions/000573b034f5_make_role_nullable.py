@@ -27,6 +27,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    op.execute("UPDATE users SET role = 'student' WHERE role IS NULL")
     op.alter_column('users', 'role',
                existing_type=postgresql.ENUM('student', 'professor', 'admin', name='userrole'),
                nullable=False)
