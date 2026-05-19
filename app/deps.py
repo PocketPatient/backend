@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Callable
 
 from fastapi import Depends, Header, HTTPException
@@ -21,8 +22,8 @@ async def get_current_user(
     token = authorization.removeprefix("Bearer ")
     try:
         payload = jwt.decode(token, settings.jwt_public_key, algorithms=["RS256"])
-        user_id: str = payload["sub"]
-    except (JWTError, KeyError):
+        user_id = uuid.UUID(payload["sub"])
+    except (JWTError, KeyError, ValueError):
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
