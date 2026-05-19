@@ -23,6 +23,7 @@ def test_verify_firebase_token_scarletmail():
     decoded = {
         "uid": "uid1",
         "email": "student@scarletmail.rutgers.edu",
+        "email_verified": True,
         "name": "Alice",
         "firebase": {"sign_in_provider": "google.com"},
     }
@@ -37,6 +38,7 @@ def test_verify_firebase_token_rutgers_edu():
     decoded = {
         "uid": "uid2",
         "email": "prof@rutgers.edu",
+        "email_verified": True,
         "name": "Bob",
         "firebase": {"sign_in_provider": "password"},
     }
@@ -47,6 +49,19 @@ def test_verify_firebase_token_rutgers_edu():
 
 def test_verify_firebase_token_non_rutgers_raises_403():
     decoded = {"uid": "uid3", "email": "test@gmail.com", "firebase": {"sign_in_provider": "google.com"}}
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        with pytest.raises(HTTPException) as exc:
+            verify_firebase_token("valid-token")
+    assert exc.value.status_code == 403
+
+
+def test_verify_firebase_token_unverified_email_raises_403():
+    decoded = {
+        "uid": "uid4",
+        "email": "student@scarletmail.rutgers.edu",
+        "email_verified": False,
+        "firebase": {"sign_in_provider": "password"},
+    }
     with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
         with pytest.raises(HTTPException) as exc:
             verify_firebase_token("valid-token")
@@ -164,7 +179,7 @@ async def test_verify_and_rotate_success(rsa_keys):
     existing_user.role = UserRole.student
 
     redis_mock = AsyncMock()
-    redis_mock.get = AsyncMock(return_value=str(user_id))
+    redis_mock.getdel = AsyncMock(return_value=str(user_id))
 
     db = AsyncMock()
     mock_result = MagicMock()
@@ -175,7 +190,6 @@ async def test_verify_and_rotate_success(rsa_keys):
         mock_cfg.jwt_private_key = private_pem
         access_token, new_refresh = await verify_and_rotate_refresh_token(raw_token, redis_mock, db)
 
-    redis_mock.delete.assert_awaited_once_with(f"refresh:{token_hash}")
     payload = jwt.decode(access_token, public_pem, algorithms=["RS256"])
     assert payload["sub"] == str(user_id)
     assert len(new_refresh) == 64
@@ -183,7 +197,7 @@ async def test_verify_and_rotate_success(rsa_keys):
 
 async def test_verify_and_rotate_invalid_token_raises_401():
     redis_mock = AsyncMock()
-    redis_mock.get = AsyncMock(return_value=None)
+    redis_mock.getdel = AsyncMock(return_value=None)
     db = AsyncMock()
 
     with pytest.raises(HTTPException) as exc:
@@ -196,7 +210,7 @@ async def test_verify_and_rotate_user_deleted_raises_401():
     raw_token = "b" * 64
 
     redis_mock = AsyncMock()
-    redis_mock.get = AsyncMock(return_value=str(user_id))
+    redis_mock.getdel = AsyncMock(return_value=str(user_id))
 
     db = MagicMock()
     mock_result = MagicMock()

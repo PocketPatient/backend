@@ -15,7 +15,6 @@ class UserRole(str, Enum):
 
 class UserOut(BaseModel):
     id: uuid.UUID
-    google_uid: str
     email: str
     role: UserRole | None
     is_verified: bool | None

@@ -27,6 +27,8 @@ def verify_firebase_token(id_token: str) -> dict:
     email: str = decoded.get("email", "")
     if not any(email.endswith(domain) for domain in _RUTGERS_DOMAINS):
         raise HTTPException(status_code=403, detail="Must use a Rutgers email address")
+    if not decoded.get("email_verified", False):
+        raise HTTPException(status_code=403, detail="Email address not verified")
     return {
         "uid": decoded["uid"],
         "email": email,
@@ -76,10 +78,9 @@ async def verify_and_rotate_refresh_token(
 ) -> tuple[str, str]:
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     key = f"refresh:{token_hash}"
-    user_id_str = await redis.get(key)
+    user_id_str = await redis.getdel(key)
     if not user_id_str:
         raise HTTPException(status_code=401, detail="Refresh token invalid or expired")
-    await redis.delete(key)
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
     user = result.scalar_one_or_none()
     if user is None:
