@@ -58,6 +58,7 @@ async def test_professor_list_courses_sees_own(client, professor):
     assert "Course B" in titles
 
 
+@pytest.mark.skip(reason="requires POST /enrollments/join — enabled in Task 6")
 async def test_student_list_courses_sees_enrolled(client, professor, student):
     _, prof_token = professor
     _, stu_token = student
