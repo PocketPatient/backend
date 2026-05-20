@@ -96,7 +96,9 @@ async def _truncate_all():
     """Open a fresh asyncpg connection (not pooled) to truncate tables."""
     conn = await asyncpg.connect(_ASYNCPG_DSN)
     try:
-        await conn.execute("TRUNCATE TABLE enrollments, courses, users CASCADE")
+        await conn.execute(
+            "TRUNCATE TABLE disease_documents, diseases, units, enrollments, courses, users CASCADE"
+        )
     finally:
         await conn.close()
 
