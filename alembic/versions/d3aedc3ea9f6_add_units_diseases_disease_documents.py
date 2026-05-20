@@ -70,5 +70,5 @@ def downgrade() -> None:
     op.drop_table('diseases')
     op.drop_table('units')
     op.drop_table('disease_documents')
-    sa.Enum(name='unit_status').drop(op.get_bind(), checkfirst=True)
+    op.execute(sa.text("DROP TYPE IF EXISTS unit_status"))
     # ### end Alembic commands ###
