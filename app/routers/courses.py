@@ -57,6 +57,58 @@ def _student_count_subquery():
     )
 
 
+@router.get("", response_model=list[CourseOut])
+async def list_courses(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    sq = _student_count_subquery()
+    if current_user.role == UserRole.professor:
+        stmt = (
+            select(Course, sq.label("student_count"))
+            .where(Course.professor_id == current_user.id)
+        )
+    else:
+        enrolled_sq = select(Enrollment.course_id).where(Enrollment.user_id == current_user.id)
+        stmt = (
+            select(Course, sq.label("student_count"))
+            .where(Course.id.in_(enrolled_sq))
+        )
+    rows = (await db.execute(stmt)).all()
+    return [_make_course_out(course, count) for course, count in rows]
+
+
+@router.get("/{course_id}", response_model=CourseOut)
+async def get_course(
+    course_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    sq = _student_count_subquery()
+    result = await db.execute(
+        select(Course, sq.label("student_count")).where(Course.id == course_id)
+    )
+    row = result.one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+    course, count = row
+
+    if current_user.role == UserRole.professor:
+        if course.professor_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Course not found")
+    else:
+        enrolled = await db.execute(
+            select(Enrollment).where(
+                Enrollment.course_id == course_id,
+                Enrollment.user_id == current_user.id,
+            )
+        )
+        if enrolled.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+
+    return _make_course_out(course, count)
+
+
 @router.post("", status_code=201, response_model=CourseOut)
 async def create_course(
     body: CourseCreate,
