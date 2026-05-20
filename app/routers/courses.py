@@ -5,6 +5,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -64,19 +65,17 @@ async def create_course(
 ):
     for _ in range(10):
         code = _generate_class_code()
-        existing = await db.execute(select(Course).where(Course.class_code == code))
-        if existing.scalar_one_or_none() is None:
-            break
-    else:
-        raise HTTPException(status_code=500, detail="Failed to generate unique class code")
-
-    course = Course(
-        title=body.title,
-        professor_id=current_user.id,
-        class_code=code,
-        semester=body.semester,
-    )
-    db.add(course)
-    await db.commit()
-    await db.refresh(course)
-    return _make_course_out(course, 0)
+        course = Course(
+            title=body.title,
+            professor_id=current_user.id,
+            class_code=code,
+            semester=body.semester,
+        )
+        db.add(course)
+        try:
+            await db.commit()
+            await db.refresh(course)
+            return _make_course_out(course, 0)
+        except IntegrityError:
+            await db.rollback()
+    raise HTTPException(status_code=500, detail="Failed to generate unique class code")

@@ -16,6 +16,7 @@ async def test_professor_creates_course(client, professor):
     assert body["semester"] == "Fall 2026"
     assert len(body["class_code"]) == 6
     assert body["class_code"].isupper()
+    assert all(c in "ABCDEFGHJKMNPQRSTUVWXYZ23456789" for c in body["class_code"])
     assert body["student_count"] == 0
     assert body["is_active"] is True
 
