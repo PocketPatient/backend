@@ -51,3 +51,61 @@ async def join_course(
     )
     count = count_result.scalar_one()
     return _make_course_out(course, count)
+
+
+@router.get("/courses/{course_id}/students", response_model=list[EnrolledStudentOut])
+async def list_students(
+    course_id: uuid.UUID,
+    current_user: User = Depends(require_role("professor")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Course).where(Course.id == course_id, Course.professor_id == current_user.id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    rows = (
+        await db.execute(
+            select(User, Enrollment.enrolled_at)
+            .join(Enrollment, Enrollment.user_id == User.id)
+            .where(Enrollment.course_id == course_id)
+        )
+    ).all()
+
+    return [
+        EnrolledStudentOut(
+            user_id=user.id,
+            email=user.email,
+            display_name=user.display_name,
+            enrolled_at=enrolled_at,
+        )
+        for user, enrolled_at in rows
+    ]
+
+
+@router.delete("/courses/{course_id}/students/{user_id}", status_code=204)
+async def remove_student(
+    course_id: uuid.UUID,
+    user_id: uuid.UUID,
+    current_user: User = Depends(require_role("professor")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Course).where(Course.id == course_id, Course.professor_id == current_user.id)
+    )
+    if result.scalar_one_or_none() is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    enrollment_result = await db.execute(
+        select(Enrollment).where(
+            Enrollment.course_id == course_id,
+            Enrollment.user_id == user_id,
+        )
+    )
+    row = enrollment_result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Student not enrolled in this course")
+
+    await db.delete(row)
+    await db.commit()
