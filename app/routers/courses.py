@@ -109,6 +109,49 @@ async def get_course(
     return _make_course_out(course, count)
 
 
+@router.put("/{course_id}", response_model=CourseOut)
+async def update_course(
+    course_id: uuid.UUID,
+    body: CourseUpdate,
+    current_user: User = Depends(require_role("professor")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Course).where(Course.id == course_id, Course.professor_id == current_user.id)
+    )
+    course = result.scalar_one_or_none()
+    if course is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(course, field, value)
+
+    await db.commit()
+    await db.refresh(course)
+    count = await _count_students(db, course.id)
+    return _make_course_out(course, count)
+
+
+@router.delete("/{course_id}/deactivate", response_model=CourseOut)
+async def deactivate_course(
+    course_id: uuid.UUID,
+    current_user: User = Depends(require_role("professor")),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Course).where(Course.id == course_id, Course.professor_id == current_user.id)
+    )
+    course = result.scalar_one_or_none()
+    if course is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    course.is_active = False
+    await db.commit()
+    await db.refresh(course)
+    count = await _count_students(db, course.id)
+    return _make_course_out(course, count)
+
+
 @router.post("", status_code=201, response_model=CourseOut)
 async def create_course(
     body: CourseCreate,

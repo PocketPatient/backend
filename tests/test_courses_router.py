@@ -132,3 +132,95 @@ async def test_get_course_detail_wrong_professor_returns_404(client, professor, 
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert response.status_code == 404
+
+
+async def test_professor_updates_course(client, professor):
+    _, token = professor
+    create_resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "Old Title", "semester": "Fall 2026"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create_resp.json()["id"]
+    response = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"title": "New Title", "semester": "Spring 2027"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "New Title"
+    assert body["semester"] == "Spring 2027"
+
+
+async def test_update_course_wrong_owner_returns_404(client, professor, rsa_keys):
+    _, token = professor
+    create_resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "Mine"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create_resp.json()["id"]
+
+    import uuid
+    from datetime import datetime, timezone
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from app.models.user import User, UserRole
+    from tests.conftest import TEST_DATABASE_URL, _make_token
+    private_pem, _ = rsa_keys
+    other = User(
+        id=uuid.uuid4(),
+        google_uid=f"other2-{uuid.uuid4().hex}",
+        email=f"other2-{uuid.uuid4().hex[:8]}@test.edu",
+        role=UserRole.professor,
+        is_verified=False,
+        display_name="Other Prof",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as s:
+        s.add(other)
+        await s.commit()
+    await engine.dispose()
+    other_token = _make_token(other.id, private_pem)
+
+    response = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"title": "Hijacked"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert response.status_code == 404
+
+
+async def test_professor_deactivates_course(client, professor):
+    _, token = professor
+    create_resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "Active Course"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create_resp.json()["id"]
+    response = await client.delete(
+        f"/api/v1/courses/{course_id}/deactivate",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+
+
+async def test_student_cannot_deactivate_course(client, student, professor):
+    _, prof_token = professor
+    _, stu_token = student
+    create_resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "Prof Course"},
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    course_id = create_resp.json()["id"]
+    response = await client.delete(
+        f"/api/v1/courses/{course_id}/deactivate",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert response.status_code == 403
