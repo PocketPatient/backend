@@ -106,6 +106,49 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 
 ---
 
+## Disease Documents
+
+| Method | Path | Description | Auth | Status |
+|--------|------|-------------|------|--------|
+| POST | `/api/v1/courses/{course_id}/disease-document` | Upload a disease document (CSV or JSON) and return preview | Bearer JWT | ✅ Week 4 |
+| POST | `/api/v1/courses/{course_id}/disease-document/confirm` | Commit the most recent pending upload — replaces existing units | Bearer JWT | ✅ Week 4 |
+
+### POST /api/v1/courses/{course_id}/disease-document
+**Role required:** professor (must own the course)
+**Request:** `multipart/form-data` with a single `file` field (`.csv` or `.json`)
+**Behavior:** Stores the raw file, creates a `disease_documents` row with the next per-course version, parses and returns a preview. Does **not** create Unit/Disease rows.
+**Response (200):**
+```json
+{
+  "document_id": "uuid",
+  "version": 1,
+  "units": [
+    {"label": "Unit 1: Mood Disorders", "disease_count": 3, "diseases": ["MDD", "Bipolar I", "Bipolar II"]}
+  ],
+  "errors": [
+    {"location": "row 5", "message": "missing required field: difficulty_tier"}
+  ]
+}
+```
+**Errors:** 400 unsupported extension, 401 unauthenticated, 403 not a professor, 404 course not found or not owner
+
+### POST /api/v1/courses/{course_id}/disease-document/confirm
+**Role required:** professor (must own the course)
+**Behavior:** Finds the latest unparsed upload for this course, re-reads and re-parses the file, then (if no parse errors and no released units) deletes existing units and inserts the new ones atomically. Sets `parsed_at` on the document row.
+**Response (200):**
+```json
+{"document_id": "uuid", "version": 1, "units_created": 2, "diseases_created": 6}
+```
+**Errors:**
+- 400 — parse errors present (`detail.errors` lists them); nothing committed
+- 401 — unauthenticated
+- 403 — not a professor
+- 404 — course not found, or no pending upload to confirm
+- 409 — at least one existing unit has `status = 'released'`
+- 410 — upload file no longer exists on disk (re-upload required)
+
+---
+
 ## Health
 
 | Method | Path | Description | Status |
