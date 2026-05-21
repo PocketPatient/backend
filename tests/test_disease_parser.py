@@ -213,3 +213,21 @@ def test_parse_dispatch_csv():
     result = parse("doc.csv", VALID_CSV.encode("utf-8"))
     assert result.errors == []
     assert len(result.units) == 2
+
+
+def test_parse_json_empty_string_returns_empty_result():
+    result = parse_json("")
+    assert result.units == []
+    assert result.errors == []
+
+
+def test_parse_json_whitespace_only_returns_empty_result():
+    result = parse_json("   \n\t  ")
+    assert result.units == []
+    assert result.errors == []
+
+
+def test_parse_csv_empty_string_returns_empty_result():
+    result = parse_csv("")
+    assert result.units == []
+    assert result.errors == []

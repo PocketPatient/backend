@@ -380,3 +380,15 @@ async def test_confirm_by_student_returns_403(client, professor, student):
         headers={"Authorization": f"Bearer {stu_token}"},
     )
     assert resp.status_code == 403
+
+
+async def test_upload_dotfile_filename_returns_400(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    files = {"file": (".json", b'{"units":[]}', "application/json")}
+    resp = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400

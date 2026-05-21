@@ -107,6 +107,8 @@ def _validate_disease(raw: dict[str, Any], path: str, errors: list[ParseError]) 
 
 def parse_json(text: str) -> ParseResult:
     result = ParseResult()
+    if not text.strip():
+        return result
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
@@ -167,6 +169,8 @@ def _split_semi(s: str) -> list[str]:
 
 def parse_csv(text: str) -> ParseResult:
     result = ParseResult()
+    if not text.strip():
+        return result
     try:
         reader = csv.DictReader(io.StringIO(text))
     except csv.Error as e:

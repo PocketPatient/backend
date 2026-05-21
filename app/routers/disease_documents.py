@@ -3,6 +3,8 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
+from pathlib import PurePath
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,7 +47,7 @@ async def _get_owned_course(
 def _extract_extension(filename: str | None) -> str:
     if not filename:
         raise HTTPException(status_code=400, detail="filename is required")
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ext = PurePath(filename).suffix.lower().lstrip(".")
     if ext not in _SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400, detail=f"unsupported file extension: {ext!r} (expected .json or .csv)"
@@ -140,7 +142,7 @@ async def confirm_disease_document(
         )
 
     existing_units = (
-        await db.execute(select(Unit).where(Unit.course_id == course.id))
+        await db.execute(select(Unit).where(Unit.course_id == course.id).with_for_update())
     ).scalars().all()
     if any(u.status == UnitStatus.released for u in existing_units):
         raise HTTPException(
