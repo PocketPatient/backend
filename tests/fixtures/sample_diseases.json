@@ -1,0 +1,74 @@
+{
+  "units": [
+    {
+      "label": "Unit 1: Mood Disorders",
+      "diseases": [
+        {
+          "name": "Major Depressive Disorder",
+          "dsm_code": "F32.1",
+          "category": "Mood Disorders",
+          "key_symptoms": ["depressed mood", "anhedonia", "insomnia", "fatigue"],
+          "differentials": ["Bipolar II", "Adjustment Disorder", "Dysthymia"],
+          "difficulty_tier": 2,
+          "speech_style": "flat",
+          "nudge_behavior": {"frequency": "low", "tone": "withdrawn", "example": "I guess you're busy too"}
+        },
+        {
+          "name": "Bipolar I Disorder",
+          "dsm_code": "F31.1",
+          "category": "Mood Disorders",
+          "key_symptoms": ["mania", "elevated mood", "decreased need for sleep", "grandiosity"],
+          "differentials": ["Bipolar II", "Schizoaffective Disorder", "Substance-Induced Mood Disorder"],
+          "difficulty_tier": 3,
+          "speech_style": "pressured",
+          "nudge_behavior": {"frequency": "high", "tone": "urgent", "example": "I just had the BEST idea, you have to hear it"}
+        },
+        {
+          "name": "Bipolar II Disorder",
+          "dsm_code": "F31.81",
+          "category": "Mood Disorders",
+          "key_symptoms": ["hypomania", "depressive episodes", "mood instability"],
+          "differentials": ["Bipolar I", "MDD with mixed features", "Cyclothymia"],
+          "difficulty_tier": 4,
+          "speech_style": "variable",
+          "nudge_behavior": {"frequency": "medium", "tone": "uneven", "example": "Some days I feel on top of the world"}
+        }
+      ]
+    },
+    {
+      "label": "Unit 2: Anxiety Disorders",
+      "diseases": [
+        {
+          "name": "Generalized Anxiety Disorder",
+          "dsm_code": "F41.1",
+          "category": "Anxiety Disorders",
+          "key_symptoms": ["excessive worry", "muscle tension", "irritability", "sleep disturbance"],
+          "differentials": ["Panic Disorder", "OCD", "Adjustment Disorder"],
+          "difficulty_tier": 2,
+          "speech_style": "tangential",
+          "nudge_behavior": {"frequency": "high", "tone": "worried", "example": "Did you see my last message? Just checking"}
+        },
+        {
+          "name": "Panic Disorder",
+          "dsm_code": "F41.0",
+          "category": "Anxiety Disorders",
+          "key_symptoms": ["panic attacks", "fear of recurrence", "avoidance"],
+          "differentials": ["GAD", "Specific Phobia", "Cardiac causes"],
+          "difficulty_tier": 3,
+          "speech_style": "rapid",
+          "nudge_behavior": {"frequency": "medium", "tone": "fearful", "example": "I think something is really wrong with me"}
+        },
+        {
+          "name": "Social Anxiety Disorder",
+          "dsm_code": "F40.10",
+          "category": "Anxiety Disorders",
+          "key_symptoms": ["fear of judgment", "avoidance of social situations", "physical symptoms in public"],
+          "differentials": ["Avoidant Personality", "Agoraphobia", "GAD"],
+          "difficulty_tier": 2,
+          "speech_style": "hesitant",
+          "nudge_behavior": {"frequency": "low", "tone": "apologetic", "example": "Sorry to bother you again"}
+        }
+      ]
+    }
+  ]
+}
