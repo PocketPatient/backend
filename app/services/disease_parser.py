@@ -146,8 +146,90 @@ def parse_json(text: str) -> ParseResult:
     return result
 
 
+_CSV_REQUIRED_COLUMNS = {
+    "unit_label",
+    "disease_name",
+    "dsm_code",
+    "category",
+    "key_symptoms",
+    "differentials",
+    "difficulty_tier",
+    "speech_style",
+    "nudge_frequency",
+    "nudge_tone",
+    "nudge_example",
+}
+
+
+def _split_semi(s: str) -> list[str]:
+    return [part.strip() for part in s.split(";") if part.strip()]
+
+
 def parse_csv(text: str) -> ParseResult:
-    raise NotImplementedError
+    result = ParseResult()
+    try:
+        reader = csv.DictReader(io.StringIO(text))
+    except csv.Error as e:
+        result.errors.append(ParseError(location="<root>", message=f"invalid CSV: {e}"))
+        return result
+
+    if reader.fieldnames is None:
+        result.errors.append(ParseError(location="<root>", message="CSV is empty or has no header"))
+        return result
+
+    missing = _CSV_REQUIRED_COLUMNS - set(reader.fieldnames)
+    if missing:
+        result.errors.append(
+            ParseError(location="<root>", message=f"CSV missing required columns: {sorted(missing)}")
+        )
+        return result
+
+    # Group rows by unit_label preserving first-seen order.
+    units_in_order: list[str] = []
+    units_by_label: dict[str, list[ParsedDisease]] = {}
+
+    for row_idx, row in enumerate(reader, start=2):  # start=2 → header is row 1
+        location = f"row {row_idx}"
+        unit_label = (row.get("unit_label") or "").strip()
+        if not unit_label:
+            result.errors.append(ParseError(location=f"{location}.unit_label", message="unit_label is required"))
+            continue
+
+        tier_raw = (row.get("difficulty_tier") or "").strip()
+        try:
+            tier = int(tier_raw)
+        except (TypeError, ValueError):
+            result.errors.append(
+                ParseError(location=f"{location}.difficulty_tier", message="difficulty_tier must be an integer between 1 and 5")
+            )
+            tier = None  # type: ignore[assignment]
+
+        disease_dict = {
+            "name": (row.get("disease_name") or "").strip(),
+            "dsm_code": (row.get("dsm_code") or "").strip() or None,
+            "category": (row.get("category") or "").strip(),
+            "key_symptoms": _split_semi(row.get("key_symptoms") or ""),
+            "differentials": _split_semi(row.get("differentials") or ""),
+            "difficulty_tier": tier,
+            "speech_style": (row.get("speech_style") or "").strip(),
+            "nudge_behavior": {
+                "frequency": (row.get("nudge_frequency") or "").strip(),
+                "tone": (row.get("nudge_tone") or "").strip(),
+                "example": (row.get("nudge_example") or "").strip(),
+            },
+        }
+
+        parsed = _validate_disease(disease_dict, location, result.errors)
+        if parsed is None:
+            continue
+        if unit_label not in units_by_label:
+            units_by_label[unit_label] = []
+            units_in_order.append(unit_label)
+        units_by_label[unit_label].append(parsed)
+
+    for label in units_in_order:
+        result.units.append(ParsedUnit(label=label, diseases=units_by_label[label]))
+    return result
 
 
 def parse(filename: str, raw: bytes) -> ParseResult:

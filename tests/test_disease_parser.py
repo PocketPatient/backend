@@ -6,6 +6,7 @@ from app.services.disease_parser import (
     ParsedDisease,
     ParsedUnit,
     parse,
+    parse_csv,
     parse_json,
 )
 
@@ -144,3 +145,70 @@ def test_parse_json_dsm_code_wrong_type_is_error():
     result = parse_json(text)
     assert any("dsm_code" in e.location for e in result.errors)
     assert result.units[0].diseases == []
+
+
+VALID_CSV = """unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example
+Unit 1: Mood,Major Depressive Disorder,F32.1,Mood Disorders,depressed mood;anhedonia,Bipolar II;Adjustment Disorder,2,flat,low,withdrawn,I guess you're busy too
+Unit 1: Mood,Bipolar I,F31.1,Mood Disorders,mania;elevated mood,Bipolar II;Schizoaffective,3,pressured,high,urgent,I have the best idea ever
+Unit 2: Anxiety,Generalized Anxiety,F41.1,Anxiety Disorders,worry;tension,Panic;Adjustment,2,tangential,high,worried,Did you see my last message?
+"""
+
+
+def test_parse_csv_happy_path():
+    result = parse_csv(VALID_CSV)
+    assert result.errors == []
+    assert len(result.units) == 2
+    mood = next(u for u in result.units if u.label == "Unit 1: Mood")
+    assert len(mood.diseases) == 2
+    assert mood.diseases[0].key_symptoms == ["depressed mood", "anhedonia"]
+    assert mood.diseases[0].nudge_behavior == {
+        "frequency": "low",
+        "tone": "withdrawn",
+        "example": "I guess you're busy too",
+    }
+    anxiety = next(u for u in result.units if u.label == "Unit 2: Anxiety")
+    assert len(anxiety.diseases) == 1
+
+
+def test_parse_csv_missing_required_field():
+    text = (
+        "unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example\n"
+        "Unit 1,,F1,Mood,a;b,c;d,1,flat,low,flat,ex\n"
+    )
+    result = parse_csv(text)
+    assert any("name" in e.location for e in result.errors)
+    assert result.units == [] or all(u.diseases == [] for u in result.units)
+
+
+def test_parse_csv_difficulty_tier_not_int():
+    text = (
+        "unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example\n"
+        "Unit 1,X,F1,Mood,a;b,c;d,not-a-number,flat,low,flat,ex\n"
+    )
+    result = parse_csv(text)
+    assert any("difficulty_tier" in e.location for e in result.errors)
+
+
+def test_parse_csv_dsm_code_blank_becomes_none():
+    text = (
+        "unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example\n"
+        "Unit 1,X,,Mood,a;b,c;d,1,flat,low,flat,ex\n"
+    )
+    result = parse_csv(text)
+    assert result.errors == []
+    assert result.units[0].diseases[0].dsm_code is None
+
+
+def test_parse_csv_missing_unit_label():
+    text = (
+        "unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example\n"
+        ",X,F1,Mood,a;b,c;d,1,flat,low,flat,ex\n"
+    )
+    result = parse_csv(text)
+    assert any("unit_label" in e.location for e in result.errors)
+
+
+def test_parse_dispatch_csv():
+    result = parse("doc.csv", VALID_CSV.encode("utf-8"))
+    assert result.errors == []
+    assert len(result.units) == 2
