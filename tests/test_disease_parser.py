@@ -187,6 +187,7 @@ def test_parse_csv_difficulty_tier_not_int():
     )
     result = parse_csv(text)
     assert any("difficulty_tier" in e.location for e in result.errors)
+    assert len(result.errors) == 1
 
 
 def test_parse_csv_dsm_code_blank_becomes_none():

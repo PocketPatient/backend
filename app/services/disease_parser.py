@@ -202,7 +202,7 @@ def parse_csv(text: str) -> ParseResult:
             result.errors.append(
                 ParseError(location=f"{location}.difficulty_tier", message="difficulty_tier must be an integer between 1 and 5")
             )
-            tier = None  # type: ignore[assignment]
+            continue
 
         disease_dict = {
             "name": (row.get("disease_name") or "").strip(),
