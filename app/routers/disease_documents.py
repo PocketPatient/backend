@@ -115,6 +115,7 @@ async def confirm_disease_document(
         .where(DiseaseDocument.course_id == course.id, DiseaseDocument.parsed_at.is_(None))
         .order_by(DiseaseDocument.uploaded_at.desc())
         .limit(1)
+        .with_for_update()
     )
     doc = doc_result.scalar_one_or_none()
     if doc is None:
