@@ -78,7 +78,7 @@ def test_parse_json_difficulty_out_of_range():
     ]}]}
     """
     result = parse_json(text)
-    assert any("difficulty_tier" in e.location for e in result.errors)
+    assert any("difficulty_tier" in e.location and "1 and 5" in e.message for e in result.errors)
 
 
 def test_parse_json_partial_success():
@@ -124,3 +124,23 @@ def test_parse_dispatch_json():
     result = parse("doc.json", VALID_JSON.encode("utf-8"))
     assert result.errors == []
     assert len(result.units) == 1
+
+
+def test_parse_json_root_not_dict():
+    result = parse_json("[1, 2, 3]")
+    assert result.units == []
+    assert len(result.errors) == 1
+    assert result.errors[0].location == "<root>"
+    assert "object" in result.errors[0].message
+
+
+def test_parse_json_dsm_code_wrong_type_is_error():
+    text = """
+    {"units":[{"label":"U","diseases":[
+        {"name":"X","dsm_code":123,"category":"C","key_symptoms":["s"],"differentials":["d"],
+         "difficulty_tier":1,"speech_style":"flat","nudge_behavior":{"frequency":"low","tone":"flat","example":""}}
+    ]}]}
+    """
+    result = parse_json(text)
+    assert any("dsm_code" in e.location for e in result.errors)
+    assert result.units[0].diseases == []

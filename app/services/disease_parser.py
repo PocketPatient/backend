@@ -75,14 +75,19 @@ def _validate_disease(raw: dict[str, Any], path: str, errors: list[ParseError]) 
                 errors.append(ParseError(location=f"{path}.nudge_behavior.{f}", message=f"missing or empty required field: {f}"))
                 ok = False
 
+    dsm_raw = raw.get("dsm_code")
+    dsm: str | None
+    if dsm_raw is None:
+        dsm = None
+    elif isinstance(dsm_raw, str):
+        dsm = dsm_raw.strip() or None
+    else:
+        errors.append(ParseError(location=f"{path}.dsm_code", message="dsm_code must be a string"))
+        dsm = None
+        ok = False
+
     if not ok:
         return None
-
-    dsm = raw.get("dsm_code")
-    if dsm is not None and not isinstance(dsm, str):
-        dsm = str(dsm)
-    if isinstance(dsm, str) and not dsm.strip():
-        dsm = None
 
     return ParsedDisease(
         name=raw["name"].strip(),
@@ -106,6 +111,10 @@ def parse_json(text: str) -> ParseResult:
         data = json.loads(text)
     except json.JSONDecodeError as e:
         result.errors.append(ParseError(location="<root>", message=f"invalid JSON: {e}"))
+        return result
+
+    if not isinstance(data, dict):
+        result.errors.append(ParseError(location="<root>", message="JSON root must be an object"))
         return result
 
     units_raw = data.get("units")
