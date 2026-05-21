@@ -6,7 +6,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 
 from app.config import settings
-from app.routers import auth, courses, enrollments, users
+from app.routers import auth, courses, disease_documents, enrollments, users
 
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ app = FastAPI(title="PocketPatient API", version="0.1.0", lifespan=lifespan)
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(users.router, prefix="/api/v1")
 app.include_router(courses.router, prefix="/api/v1")
+app.include_router(disease_documents.router, prefix="/api/v1")
 app.include_router(enrollments.router, prefix="/api/v1")
 
 
