@@ -60,6 +60,9 @@ async def upload_disease_document(
     ext = _extract_extension(file.filename)
     raw = await file.read()
 
+    # Parse first — pure function, cheap, fails fast before any side effects.
+    result = disease_parser.parse(file.filename, raw)
+
     max_version = (
         await db.execute(
             select(func.coalesce(func.max(DiseaseDocument.version), 0)).where(
@@ -80,8 +83,6 @@ async def upload_disease_document(
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
-
-    result = disease_parser.parse(file.filename, raw)
     return DiseaseDocumentPreview(
         document_id=doc.id,
         version=doc.version,
