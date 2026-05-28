@@ -10,6 +10,7 @@ build/
 
 # Env
 .env
+*.pem
 
 # Alembic
 alembic/versions/*.pyc
