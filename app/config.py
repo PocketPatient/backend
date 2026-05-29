@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     secret_key: str = "changeme"
     firebase_project_id: str = ""
+    firebase_credentials_path: str = ""
     jwt_private_key: str = ""
     jwt_public_key: str = ""
 

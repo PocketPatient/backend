@@ -11,6 +11,8 @@ build/
 # Env
 .env
 *.pem
+serviceAccountKey.json
+*firebase-adminsdk*.json
 
 # Alembic
 alembic/versions/*.pyc
