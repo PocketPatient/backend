@@ -14,7 +14,7 @@ from app.deps import require_role
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.disease_document import DiseaseDocument
-from app.models.unit import Unit, UnitStatus
+from app.models.unit import Unit
 from app.models.user import User
 from app.schemas.disease_document import (
     DiffSummary,
@@ -184,43 +184,95 @@ async def confirm_disease_document(
             },
         )
 
+    # Load existing units (all statuses) with a row lock
     existing_units = (
-        await db.execute(select(Unit).where(Unit.course_id == course.id).with_for_update())
-    ).scalars().all()
-    if any(u.status == UnitStatus.released for u in existing_units):
-        raise HTTPException(
-            status_code=409,
-            detail="Close all released units before re-uploading",
+        await db.execute(
+            select(Unit).where(Unit.course_id == course.id).with_for_update()
         )
+    ).scalars().all()
+    existing_unit_map = {u.label: u for u in existing_units}
+    unit_id_to_label = {u.id: u.label for u in existing_units}
 
-    for u in existing_units:
-        await db.delete(u)
-    await db.flush()
+    # Load active diseases (locked via units join)
+    raw_diseases = (
+        await db.execute(
+            select(Disease)
+            .join(Unit, Disease.unit_id == Unit.id)
+            .where(Unit.course_id == course.id, Disease.is_active == True)  # noqa: E712
+        )
+    ).scalars().all()
+
+    existing_disease_map: dict[tuple[str, str], Disease] = {
+        (unit_id_to_label[d.unit_id], d.name): d for d in raw_diseases
+    }
+    existing_disease_list = [
+        ExistingDisease(
+            name=d.name,
+            unit_label=unit_id_to_label[d.unit_id],
+            dsm_code=d.dsm_code,
+            category=d.category,
+            key_symptoms=d.key_symptoms,
+            differentials=d.differentials,
+            difficulty_tier=d.difficulty_tier,
+            speech_style=d.speech_style,
+            nudge_behavior=d.nudge_behavior,
+        )
+        for d in raw_diseases
+    ]
+
+    diff_result = compute_diff(
+        parse_result,
+        list(existing_unit_map.keys()),
+        existing_disease_list,
+    )
 
     units_created = 0
     diseases_created = 0
-    units_added = []
+    seen_keys: set[tuple[str, str]] = set()
+
     for parsed_unit in parse_result.units:
-        unit = Unit(course_id=course.id, label=parsed_unit.label)
-        db.add(unit)
-        await db.flush()
-        units_created += 1
-        units_added.append(parsed_unit.label)
-        for d in parsed_unit.diseases:
-            db.add(
-                Disease(
+        if parsed_unit.label not in existing_unit_map:
+            unit = Unit(course_id=course.id, label=parsed_unit.label)
+            db.add(unit)
+            await db.flush()
+            existing_unit_map[parsed_unit.label] = unit
+            units_created += 1
+
+        unit = existing_unit_map[parsed_unit.label]
+        for parsed_disease in parsed_unit.diseases:
+            key = (parsed_unit.label, parsed_disease.name)
+            seen_keys.add(key)
+            if key not in existing_disease_map:
+                db.add(Disease(
                     unit_id=unit.id,
-                    name=d.name,
-                    dsm_code=d.dsm_code,
-                    category=d.category,
-                    key_symptoms=d.key_symptoms,
-                    differentials=d.differentials,
-                    difficulty_tier=d.difficulty_tier,
-                    speech_style=d.speech_style,
-                    nudge_behavior=d.nudge_behavior,
-                )
-            )
-            diseases_created += 1
+                    name=parsed_disease.name,
+                    dsm_code=parsed_disease.dsm_code,
+                    category=parsed_disease.category,
+                    key_symptoms=parsed_disease.key_symptoms,
+                    differentials=parsed_disease.differentials,
+                    difficulty_tier=parsed_disease.difficulty_tier,
+                    speech_style=parsed_disease.speech_style,
+                    nudge_behavior=parsed_disease.nudge_behavior,
+                ))
+                diseases_created += 1
+            else:
+                # Update modified disease in place. Active cases are not affected —
+                # a case's system prompt is generated at session creation and cached.
+                # Updating a disease here does not change any in-progress case.
+                # New cases will use the updated disease data.
+                existing_d = existing_disease_map[key]
+                existing_d.dsm_code = parsed_disease.dsm_code
+                existing_d.category = parsed_disease.category
+                existing_d.key_symptoms = parsed_disease.key_symptoms
+                existing_d.differentials = parsed_disease.differentials
+                existing_d.difficulty_tier = parsed_disease.difficulty_tier
+                existing_d.speech_style = parsed_disease.speech_style
+                existing_d.nudge_behavior = parsed_disease.nudge_behavior
+
+    # Soft-delete diseases not present in the new file (including orphaned units' diseases)
+    for key, disease in existing_disease_map.items():
+        if key not in seen_keys:
+            disease.is_active = False
 
     doc.parsed_at = datetime.now(timezone.utc)
     await db.commit()
@@ -231,10 +283,10 @@ async def confirm_disease_document(
         units_created=units_created,
         diseases_created=diseases_created,
         diff=DiffSummary(
-            units_added=units_added,
-            units_orphaned=[],
-            diseases_added=diseases_created,
-            diseases_modified=0,
-            diseases_removed=0,
+            units_added=diff_result.units_added,
+            units_orphaned=diff_result.units_orphaned,
+            diseases_added=diff_result.diseases_added,
+            diseases_modified=diff_result.diseases_modified,
+            diseases_removed=diff_result.diseases_removed,
         ),
     )

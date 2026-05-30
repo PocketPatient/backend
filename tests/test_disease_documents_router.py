@@ -294,80 +294,6 @@ async def test_confirm_when_file_missing_returns_410(client, professor):
     assert resp.status_code == 410
 
 
-async def test_confirm_replaces_existing_units(client, professor):
-    _, token = professor
-    course = await _create_course(client, token)
-    await _upload_sample(client, course["id"], token)
-    await client.post(
-        f"/api/v1/courses/{course['id']}/disease-document/confirm",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    # Upload a smaller payload and confirm again
-    smaller = {
-        "units": [
-            {
-                "label": "Just one",
-                "diseases": [
-                    {
-                        "name": "Solo",
-                        "category": "Cat",
-                        "key_symptoms": ["a"],
-                        "differentials": ["b"],
-                        "difficulty_tier": 1,
-                        "speech_style": "flat",
-                        "nudge_behavior": {"frequency": "low", "tone": "flat", "example": ""},
-                    }
-                ],
-            }
-        ]
-    }
-    await _upload_sample(client, course["id"], token, payload=json.dumps(smaller).encode("utf-8"))
-    resp = await client.post(
-        f"/api/v1/courses/{course['id']}/disease-document/confirm",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["units_created"] == 1
-    assert body["diseases_created"] == 1
-
-    # Verify only the new unit/disease remain
-    import uuid as _uuid
-    from sqlalchemy import select, func
-    from app.models.unit import Unit
-    from app.models.disease import Disease
-    async with _fresh_session() as s:
-        unit_count = (await s.execute(select(func.count()).select_from(Unit).where(Unit.course_id == _uuid.UUID(course["id"])))).scalar_one()
-        disease_count = (await s.execute(select(func.count()).select_from(Disease))).scalar_one()
-    assert unit_count == 1
-    assert disease_count == 1
-
-
-async def test_confirm_blocked_by_released_unit_returns_409(client, professor):
-    _, token = professor
-    course = await _create_course(client, token)
-    await _upload_sample(client, course["id"], token)
-    await client.post(
-        f"/api/v1/courses/{course['id']}/disease-document/confirm",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    # Mark one unit as released directly in DB
-    import uuid as _uuid
-    from sqlalchemy import select
-    from app.models.unit import Unit, UnitStatus
-    async with _fresh_session() as s:
-        unit = (await s.execute(select(Unit).where(Unit.course_id == _uuid.UUID(course["id"])))).scalars().first()
-        unit.status = UnitStatus.released
-        await s.commit()
-
-    await _upload_sample(client, course["id"], token)
-    resp = await client.post(
-        f"/api/v1/courses/{course['id']}/disease-document/confirm",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    assert resp.status_code == 409
-
 
 async def test_confirm_by_student_returns_403(client, professor, student):
     _, prof_token = professor
@@ -443,3 +369,206 @@ async def test_reupload_preview_includes_diff(client, professor):
     assert diff["diseases_removed"] == 4
     assert "Unit 3: Psychotic Disorders" in diff["units_added"]
     assert "Unit 2: Anxiety Disorders" in diff["units_orphaned"]
+
+
+# ---------------------------------------------------------------------------
+# Diff-apply confirm tests (Task 8)
+# ---------------------------------------------------------------------------
+
+
+async def _upload_and_confirm(client, token, course_id, file_bytes):
+    files = {"file": ("sample.json", file_bytes, "application/json")}
+    upload = await client.post(
+        f"/api/v1/courses/{course_id}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert upload.status_code == 200
+    confirm = await client.post(
+        f"/api/v1/courses/{course_id}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert confirm.status_code == 200
+    return confirm.json()
+
+
+async def test_confirm_first_upload_diff_has_only_added(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    result = await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+    diff = result["diff"]
+    assert diff["diseases_added"] == 6
+    assert diff["diseases_modified"] == 0
+    assert diff["diseases_removed"] == 0
+    assert len(diff["units_added"]) == 2
+    assert diff["units_orphaned"] == []
+
+
+async def test_confirm_with_released_unit_succeeds(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    # Release a unit directly in DB
+    async with _fresh_session() as s:
+        from app.models.unit import Unit, UnitStatus
+        from datetime import datetime, timezone
+        from sqlalchemy import select
+        units = (await s.execute(select(Unit))).scalars().all()
+        units[0].status = UnitStatus.released
+        units[0].release_date = datetime.now(timezone.utc)
+        await s.commit()
+
+    # Re-upload + confirm should succeed (no 409)
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    confirm = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert confirm.status_code == 200
+
+
+async def test_confirm_reupload_soft_deletes_removed_diseases(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    result = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert result.status_code == 200
+    diff = result.json()["diff"]
+    assert diff["diseases_removed"] == 4
+
+    # Verify total active disease count via units endpoint:
+    # Unit 1: MDD (modified), Bipolar I (unchanged), Cyclothymia (new) = 3
+    # Unit 3: Schizophrenia (new) = 1
+    # Unit 2: (orphaned, all diseases soft-deleted) = 0
+    # Total active = 4
+    units_resp = await client.get(
+        f"/api/v1/courses/{course['id']}/units",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert units_resp.status_code == 200
+    total_active = sum(u["disease_count"] for u in units_resp.json())
+    assert total_active == 4
+
+
+async def test_confirm_reupload_updates_modified_disease_in_place(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    # Record MDD's disease ID before re-upload
+    async with _fresh_session() as s:
+        from app.models.disease import Disease
+        from sqlalchemy import select
+        mdd = (await s.execute(select(Disease).where(Disease.name == "Major Depressive Disorder"))).scalar_one()
+        mdd_id_before = mdd.id
+        assert mdd.difficulty_tier == 2
+
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    async with _fresh_session() as s:
+        from app.models.disease import Disease
+        from sqlalchemy import select
+        mdd = (await s.execute(select(Disease).where(Disease.name == "Major Depressive Disorder"))).scalar_one()
+        # Same DB row (same id), updated field
+        assert mdd.id == mdd_id_before
+        assert mdd.difficulty_tier == 3
+
+
+async def test_confirm_reupload_creates_new_diseases(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    result = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert result.status_code == 200
+    diff = result.json()["diff"]
+    assert diff["diseases_added"] == 2  # Cyclothymia + Schizophrenia
+
+
+async def test_confirm_reupload_creates_new_unit(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    result = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert result.status_code == 200
+    diff = result.json()["diff"]
+    assert "Unit 3: Psychotic Disorders" in diff["units_added"]
+
+    units_resp = await client.get(
+        f"/api/v1/courses/{course['id']}/units",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    labels = [u["label"] for u in units_resp.json()]
+    assert "Unit 3: Psychotic Disorders" in labels
+
+
+async def test_confirm_orphaned_unit_leaves_unit_row_intact(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+    await _upload_and_confirm(client, token, course["id"], _sample_bytes())
+
+    files = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    # Unit 2 row still exists (professor can see it)
+    units_resp = await client.get(
+        f"/api/v1/courses/{course['id']}/units",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    labels = [u["label"] for u in units_resp.json()]
+    assert "Unit 2: Anxiety Disorders" in labels
+    orphaned_unit = next(u for u in units_resp.json() if u["label"] == "Unit 2: Anxiety Disorders")
+    # All its diseases were soft-deleted
+    assert orphaned_unit["disease_count"] == 0
