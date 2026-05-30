@@ -252,6 +252,26 @@ pytest
 
 ---
 
+## Local Test Accounts
+
+Two pre-seeded accounts exist for local development. Use these on the login screen with email/password sign-in — no email verification required.
+
+| Role | Email | Password |
+|------|-------|----------|
+| Student | `student@test.pocketpatient.dev` | `TestPass123!` |
+| Professor | `professor@test.pocketpatient.dev` | `TestPass123!` |
+
+To create them on a fresh local database, run:
+
+```powershell
+.venv\Scripts\activate
+python scripts/seed_test_users.py
+```
+
+Requires `allow_test_accounts=true` in `.env` (already set in the default `.env`). This flag is `False` by default and must never be enabled in production.
+
+---
+
 ## Secrets — What NOT to Commit
 
 The following files are gitignored and must never be pushed:
