@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     secret_key: str = "changeme"
     firebase_project_id: str = ""
     firebase_credentials_path: str = ""
+    allow_test_accounts: bool = False  # set True in .env for local dev only
     jwt_private_key: str = ""
     jwt_public_key: str = ""
 

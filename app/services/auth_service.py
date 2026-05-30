@@ -17,6 +17,8 @@ from app.models.user import User
 _ACCESS_TOKEN_EXPIRE_MINUTES = 15
 _REFRESH_TOKEN_EXPIRE_SECONDS = 7 * 24 * 60 * 60
 _RUTGERS_DOMAINS = ("@scarletmail.rutgers.edu", "@rutgers.edu")
+# Extra domains allowed in local dev (never reaches production — seed script only)
+_DEV_TEST_DOMAINS = ("@test.pocketpatient.dev",)
 
 
 def verify_firebase_token(id_token: str) -> dict:
@@ -25,7 +27,10 @@ def verify_firebase_token(id_token: str) -> dict:
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid Firebase token")
     email: str = decoded.get("email", "")
-    if not any(email.endswith(domain) for domain in _RUTGERS_DOMAINS):
+    allowed = _RUTGERS_DOMAINS + (
+        _DEV_TEST_DOMAINS if settings.allow_test_accounts else ()
+    )
+    if not any(email.endswith(domain) for domain in allowed):
         raise HTTPException(status_code=403, detail="Must use a Rutgers email address")
     if not decoded.get("email_verified", False):
         raise HTTPException(status_code=403, detail="Email address not verified")
