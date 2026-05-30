@@ -7,7 +7,7 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI
 
 from app.config import settings
-from app.routers import auth, courses, disease_documents, enrollments, users
+from app.routers import auth, courses, disease_documents, enrollments, units, users
 
 
 @asynccontextmanager
@@ -30,6 +30,7 @@ app.include_router(users.router, prefix="/api/v1")
 app.include_router(courses.router, prefix="/api/v1")
 app.include_router(disease_documents.router, prefix="/api/v1")
 app.include_router(enrollments.router, prefix="/api/v1")
+app.include_router(units.router, prefix="/api/v1")
 
 
 @app.get("/health")
