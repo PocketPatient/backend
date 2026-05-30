@@ -1,0 +1,54 @@
+{
+  "units": [
+    {
+      "label": "Unit 1: Mood Disorders",
+      "diseases": [
+        {
+          "name": "Major Depressive Disorder",
+          "dsm_code": "F32.1",
+          "category": "Mood Disorders",
+          "key_symptoms": ["depressed mood", "anhedonia", "insomnia", "fatigue"],
+          "differentials": ["Bipolar II", "Adjustment Disorder", "Dysthymia"],
+          "difficulty_tier": 3,
+          "speech_style": "flat",
+          "nudge_behavior": {"frequency": "low", "tone": "withdrawn", "example": "I guess you're busy too"}
+        },
+        {
+          "name": "Bipolar I Disorder",
+          "dsm_code": "F31.1",
+          "category": "Mood Disorders",
+          "key_symptoms": ["mania", "elevated mood", "decreased need for sleep", "grandiosity"],
+          "differentials": ["Bipolar II", "Schizoaffective Disorder", "Substance-Induced Mood Disorder"],
+          "difficulty_tier": 3,
+          "speech_style": "pressured",
+          "nudge_behavior": {"frequency": "high", "tone": "urgent", "example": "I just had the BEST idea, you have to hear it"}
+        },
+        {
+          "name": "Cyclothymia",
+          "dsm_code": "F34.0",
+          "category": "Mood Disorders",
+          "key_symptoms": ["mood fluctuation", "hypomanic symptoms", "mild depression"],
+          "differentials": ["Bipolar II", "Personality Disorder"],
+          "difficulty_tier": 2,
+          "speech_style": "variable",
+          "nudge_behavior": {"frequency": "medium", "tone": "uneven", "example": "Things are just up and down lately"}
+        }
+      ]
+    },
+    {
+      "label": "Unit 3: Psychotic Disorders",
+      "diseases": [
+        {
+          "name": "Schizophrenia",
+          "dsm_code": "F20.9",
+          "category": "Psychotic Disorders",
+          "key_symptoms": ["hallucinations", "delusions", "disorganized speech", "negative symptoms"],
+          "differentials": ["Schizoaffective Disorder", "Brief Psychotic Disorder", "Substance-Induced Psychosis"],
+          "difficulty_tier": 4,
+          "speech_style": "disorganized",
+          "nudge_behavior": {"frequency": "low", "tone": "confused", "example": "They're watching me again"}
+        }
+      ]
+    }
+  ]
+}

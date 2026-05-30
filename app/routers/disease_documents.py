@@ -24,6 +24,7 @@ from app.schemas.disease_document import (
     UnitPreview,
 )
 from app.services import disease_parser, file_storage
+from app.services.document_diff import ExistingDisease, compute_diff
 
 router = APIRouter(
     prefix="/courses/{course_id}/disease-document",
@@ -67,7 +68,6 @@ async def upload_disease_document(
     ext = _extract_extension(file.filename)
     raw = await file.read()
 
-    # Parse first — pure function, cheap, fails fast before any side effects.
     result = disease_parser.parse(file.filename, raw)
 
     max_version = (
@@ -90,6 +90,47 @@ async def upload_disease_document(
     db.add(doc)
     await db.commit()
     await db.refresh(doc)
+
+    diff: DiffSummary | None = None
+    if max_version >= 1:
+        existing_units = (
+            await db.execute(select(Unit).where(Unit.course_id == course.id))
+        ).scalars().all()
+        existing_unit_labels = [u.label for u in existing_units]
+        unit_id_to_label = {u.id: u.label for u in existing_units}
+
+        raw_diseases = (
+            await db.execute(
+                select(Disease)
+                .join(Unit, Disease.unit_id == Unit.id)
+                .where(Unit.course_id == course.id, Disease.is_active == True)  # noqa: E712
+            )
+        ).scalars().all()
+
+        existing_disease_list = [
+            ExistingDisease(
+                name=d.name,
+                unit_label=unit_id_to_label[d.unit_id],
+                dsm_code=d.dsm_code,
+                category=d.category,
+                key_symptoms=d.key_symptoms,
+                differentials=d.differentials,
+                difficulty_tier=d.difficulty_tier,
+                speech_style=d.speech_style,
+                nudge_behavior=d.nudge_behavior,
+            )
+            for d in raw_diseases
+        ]
+
+        diff_result = compute_diff(result, existing_unit_labels, existing_disease_list)
+        diff = DiffSummary(
+            units_added=diff_result.units_added,
+            units_orphaned=diff_result.units_orphaned,
+            diseases_added=diff_result.diseases_added,
+            diseases_modified=diff_result.diseases_modified,
+            diseases_removed=diff_result.diseases_removed,
+        )
+
     return DiseaseDocumentPreview(
         document_id=doc.id,
         version=doc.version,
@@ -102,6 +143,7 @@ async def upload_disease_document(
             for u in result.units
         ],
         errors=[ParseErrorOut(location=e.location, message=e.message) for e in result.errors],
+        diff=diff,
     )
 
 

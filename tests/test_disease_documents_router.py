@@ -392,3 +392,54 @@ async def test_upload_dotfile_filename_returns_400(client, professor):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 400
+
+
+def _sample_v2_bytes() -> bytes:
+    return (Path(__file__).parent / "fixtures" / "sample_diseases_v2.json").read_bytes()
+
+
+async def test_first_upload_diff_is_none(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+
+    files = {"file": ("sample.json", _sample_bytes(), "application/json")}
+    resp = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["diff"] is None
+
+
+async def test_reupload_preview_includes_diff(client, professor):
+    _, token = professor
+    course = await _create_course(client, token)
+
+    # First upload + confirm to create DB state
+    files = {"file": ("sample.json", _sample_bytes(), "application/json")}
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document/confirm",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    # Second upload (v2) — should return diff
+    files2 = {"file": ("sample.json", _sample_v2_bytes(), "application/json")}
+    resp = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files2,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    diff = resp.json()["diff"]
+    assert diff is not None
+    assert diff["diseases_added"] == 2
+    assert diff["diseases_modified"] == 1
+    assert diff["diseases_removed"] == 4
+    assert "Unit 3: Psychotic Disorders" in diff["units_added"]
+    assert "Unit 2: Anxiety Disorders" in diff["units_orphaned"]
