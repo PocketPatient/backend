@@ -17,6 +17,7 @@ from app.models.disease_document import DiseaseDocument
 from app.models.unit import Unit, UnitStatus
 from app.models.user import User
 from app.schemas.disease_document import (
+    DiffSummary,
     DiseaseDocumentConfirmResult,
     DiseaseDocumentPreview,
     ParseErrorOut,
@@ -156,11 +157,13 @@ async def confirm_disease_document(
 
     units_created = 0
     diseases_created = 0
+    units_added = []
     for parsed_unit in parse_result.units:
         unit = Unit(course_id=course.id, label=parsed_unit.label)
         db.add(unit)
         await db.flush()
         units_created += 1
+        units_added.append(parsed_unit.label)
         for d in parsed_unit.diseases:
             db.add(
                 Disease(
@@ -185,4 +188,11 @@ async def confirm_disease_document(
         version=doc.version,
         units_created=units_created,
         diseases_created=diseases_created,
+        diff=DiffSummary(
+            units_added=units_added,
+            units_orphaned=[],
+            diseases_added=diseases_created,
+            diseases_modified=0,
+            diseases_removed=0,
+        ),
     )
