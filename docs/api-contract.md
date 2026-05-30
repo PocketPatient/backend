@@ -71,7 +71,8 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 **Role required:** professor (must own the course)  
 **Request (all fields optional):** `{"title": "...", "semester": "...", "msg_window_start": "HH:MM:SS", "msg_window_end": "HH:MM:SS", "msg_timezone": "..."}`  
 **Response:** updated `CourseOut`  
-**Errors:** 404 not found or not owner
+**Errors:** 404 not found or not owner  
+**Validation:** Validates IANA timezone and msg_window_start < msg_window_end (422 on invalid input).
 
 ### DELETE /api/v1/courses/{id}/deactivate
 **Role required:** professor (must own the course)  
@@ -146,6 +147,37 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 - 404 — course not found, or no pending upload to confirm
 - 409 — at least one existing unit has `status = 'released'`
 - 410 — upload file no longer exists on disk (re-upload required)
+
+---
+
+## Units
+
+| Method | Path | Description | Auth | Status |
+|--------|------|-------------|------|--------|
+| GET | `/api/v1/courses/{course_id}/units` | List units (professor: all statuses with diseases; student: released only, no disease details) | Bearer JWT | ✅ Week 5 |
+| PUT | `/api/v1/courses/{course_id}/units/{unit_id}/release` | Release a draft unit (sets status=released, release_date=now) | Bearer JWT (professor) | ✅ Week 5 |
+| PUT | `/api/v1/courses/{course_id}/units/{unit_id}/close` | Close a released unit | Bearer JWT (professor) | ✅ Week 5 |
+| GET | `/api/v1/courses/{course_id}/disease-pool` | All active diseases from released units — used by scheduler | Bearer JWT (professor) | ✅ Week 5 |
+
+### GET /api/v1/courses/{course_id}/units
+**Professor (course owner):** Returns all units (draft/released/closed) with `diseases` list (active only).  
+**Student (enrolled):** Returns only `released` units. No `diseases` field — students are blind to disease details.  
+**Errors:** 404 if course not found or caller is not owner/enrolled.
+
+### PUT /api/v1/courses/{course_id}/units/{unit_id}/release
+**Role required:** professor (must own course)  
+**Response:** updated `UnitOut` with `status: "released"` and `release_date` set  
+**Errors:** 404 not found, 409 unit is not in draft status
+
+### PUT /api/v1/courses/{course_id}/units/{unit_id}/close
+**Role required:** professor (must own course)  
+**Response:** updated `UnitOut` with `status: "closed"`  
+**Errors:** 404 not found, 409 unit is not released
+
+### GET /api/v1/courses/{course_id}/disease-pool
+**Role required:** professor (must own course). Not exposed to students.  
+**Response:** `list[DiseaseOut]` — id, name, category, difficulty_tier  
+**Errors:** 404 not found or not owner
 
 ---
 
