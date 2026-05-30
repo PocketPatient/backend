@@ -223,3 +223,65 @@ async def test_student_cannot_deactivate_course(client, student, professor):
         headers={"Authorization": f"Bearer {stu_token}"},
     )
     assert response.status_code == 403
+
+
+async def test_update_course_window_start_after_end_returns_422(client, professor, clean_tables):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Psych 101"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create.status_code == 201
+    course_id = create.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"msg_window_start": "22:00:00", "msg_window_end": "08:00:00"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_course_invalid_timezone_returns_422(client, professor, clean_tables):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Psych 101"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create.status_code == 201
+    course_id = create.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"msg_timezone": "Fake/NotReal"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_update_course_valid_messaging_settings(client, professor, clean_tables):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Psych 101"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert create.status_code == 201
+    course_id = create.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={
+            "msg_window_start": "09:00:00",
+            "msg_window_end": "21:00:00",
+            "msg_timezone": "America/Chicago",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["msg_window_start"] == "09:00:00"
+    assert data["msg_window_end"] == "21:00:00"
+    assert data["msg_timezone"] == "America/Chicago"
