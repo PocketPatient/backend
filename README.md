@@ -72,6 +72,9 @@ secret_key=dev-secret-key-change-in-prod
 firebase_project_id=pocket-patient-v2
 firebase_credentials_path=serviceAccountKey.json
 
+# Allow test accounts (@test.pocketpatient.dev domain) — local dev only, never in prod
+allow_test_accounts=true
+
 # JWT RS256 keys (see below for how to generate)
 jwt_private_key="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 jwt_public_key="-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"
@@ -115,6 +118,15 @@ alembic upgrade head
 ```
 
 This creates all tables in the local Postgres instance.
+
+### 7. Seed test accounts (optional but recommended for local dev)
+
+```powershell
+.venv\Scripts\activate
+python scripts/seed_test_users.py
+```
+
+This creates `student@test.pocketpatient.dev` and `professor@test.pocketpatient.dev` in both Firebase and PostgreSQL with roles pre-set. Requires `allow_test_accounts=true` in `.env`.
 
 ---
 
@@ -160,6 +172,8 @@ app/
     ├── disease_parser.py      # JSON/CSV disease document parser
     └── file_storage.py        # Temp file storage for disease doc uploads
 alembic/                       # Database migrations
+scripts/
+└── seed_test_users.py         # Creates dev test accounts in Firebase + PostgreSQL
 tests/                         # pytest test suite
 ```
 
@@ -206,12 +220,13 @@ tests/                         # pytest test suite
 ## Auth Flow
 
 1. Flutter signs user in via Firebase (Google OAuth or email/password)
-2. Flutter sends Firebase ID token to `POST /auth/login`
-3. Backend verifies token with Firebase Admin SDK
-4. Validates email is `@rutgers.edu` or `@scarletmail.rutgers.edu` and is verified
-5. Creates or fetches user in PostgreSQL
-6. Returns RS256 access token (15 min TTL) + refresh token (7 day TTL, stored hashed in Redis)
-7. Flutter stores both tokens in secure storage and includes `Authorization: Bearer <access_token>` on all subsequent requests
+2. For email/password: Firebase enforces `email_verified = true` before the backend accepts the token
+3. Flutter sends Firebase ID token to `POST /auth/login`
+4. Backend verifies token with Firebase Admin SDK
+5. Validates email is `@rutgers.edu` or `@scarletmail.rutgers.edu` (or `@test.pocketpatient.dev` when `allow_test_accounts=true`)
+6. Creates or fetches user in PostgreSQL
+7. Returns RS256 access token (15 min TTL) + refresh token (7 day TTL, stored hashed in Redis)
+8. Flutter stores both tokens in secure storage and includes `Authorization: Bearer <access_token>` on all subsequent requests
 
 ---
 
@@ -247,6 +262,7 @@ pytest
 | `secret_key` | Yes | App secret (unused in JWT flow, keep non-empty) |
 | `firebase_project_id` | Yes | Firebase project ID (`pocket-patient-v2`) |
 | `firebase_credentials_path` | Local dev | Path to service account JSON (not needed on Cloud Run) |
+| `allow_test_accounts` | No | Set `true` in local `.env` to allow `@test.pocketpatient.dev` accounts. **Never enable in production.** |
 | `jwt_private_key` | Yes | RS256 private key (newlines as `\n`) |
 | `jwt_public_key` | Yes | RS256 public key (newlines as `\n`) |
 
