@@ -4,20 +4,34 @@ import uuid
 import zoneinfo
 from datetime import datetime, time
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class CourseCreate(BaseModel):
-    title: str
-    semester: str | None = None
+    title: str = Field(min_length=1, max_length=255)
+    semester: str | None = Field(None, max_length=20)
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, v: str) -> str:
+        if isinstance(v, str):
+            v = v.strip()
+        return v
 
 
 class CourseUpdate(BaseModel):
-    title: str | None = None
-    semester: str | None = None
+    title: str | None = Field(None, min_length=1, max_length=255)
+    semester: str | None = Field(None, max_length=20)
     msg_window_start: time | None = None
     msg_window_end: time | None = None
     msg_timezone: str | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def strip_title(cls, v: str | None) -> str | None:
+        if isinstance(v, str):
+            v = v.strip()
+        return v
 
     @field_validator("msg_timezone")
     @classmethod

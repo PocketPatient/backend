@@ -285,3 +285,24 @@ async def test_update_course_valid_messaging_settings(client, professor, clean_t
     assert data["msg_window_start"] == "09:00:00"
     assert data["msg_window_end"] == "21:00:00"
     assert data["msg_timezone"] == "America/Chicago"
+
+
+async def test_create_course_rejects_empty_title(client, clean_tables, professor):
+    user, token = professor
+    resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "   "},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["code"] == "VALIDATION_ERROR"
+
+
+async def test_create_course_rejects_missing_title(client, clean_tables, professor):
+    user, token = professor
+    resp = await client.post(
+        "/api/v1/courses",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422

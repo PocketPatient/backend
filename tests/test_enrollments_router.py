@@ -224,3 +224,20 @@ async def test_student_count_updates_after_enrollment(client, professor, student
         headers={"Authorization": f"Bearer {prof_token}"},
     )
     assert detail_resp.json()["student_count"] == 1
+
+
+async def test_join_course_rejects_invalid_class_code(client, clean_tables, student):
+    user, token = student
+    resp = await client.post(
+        "/api/v1/enrollments/join",
+        json={"class_code": "TOOLONG7"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+    resp = await client.post(
+        "/api/v1/enrollments/join",
+        json={"class_code": "AB"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
