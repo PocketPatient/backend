@@ -30,7 +30,7 @@ def _extract_user_id(request: Request) -> str | None:
     try:
         payload = jwt.decode(token, settings.jwt_public_key, algorithms=["RS256"])
         return payload.get("sub")
-    except (JWTError, Exception):
+    except Exception:
         return None
 
 
@@ -51,9 +51,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             key = f"rl:user:{user_id}" if user_id else f"rl:ip:{_client_ip(request)}"
 
         try:
-            count = await redis.incr(key)
-            if count == 1:
-                await redis.expire(key, _WINDOW_SECONDS)
+            pipe = redis.pipeline()
+            pipe.incr(key)
+            pipe.expire(key, _WINDOW_SECONDS)
+            count, _ = await pipe.execute()
             if count > limit:
                 return JSONResponse(
                     {"detail": "Rate limit exceeded", "code": "RATE_LIMIT_EXCEEDED"},

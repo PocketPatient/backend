@@ -41,24 +41,40 @@ async def client_with_counting_redis(rsa_keys, test_db):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    # Counting Redis mock
+    # Counting Redis mock — uses a pipeline to match the middleware's atomic INCR+EXPIRE
     _counts: dict[str, int] = {}
 
-    async def fake_incr(key: str) -> int:
-        _counts[key] = _counts.get(key, 0) + 1
-        return _counts[key]
+    class FakePipeline:
+        def __init__(self):
+            self._cmds = []
 
-    async def fake_expire(key: str, seconds: int) -> None:
-        pass
+        def incr(self, key: str):
+            self._cmds.append(("incr", key))
+            return self
+
+        def expire(self, key: str, seconds: int):
+            self._cmds.append(("expire", key, seconds))
+            return self
+
+        async def execute(self):
+            results = []
+            for cmd in self._cmds:
+                if cmd[0] == "incr":
+                    k = cmd[1]
+                    _counts[k] = _counts.get(k, 0) + 1
+                    results.append(_counts[k])
+                elif cmd[0] == "expire":
+                    results.append(True)
+            return results
 
     redis_mock = AsyncMock()
-    redis_mock.incr = fake_incr
-    redis_mock.expire = fake_expire
+    redis_mock.pipeline = lambda: FakePipeline()
     app.state.redis = redis_mock
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
 
+    app.state.redis = None  # reset so next test's fixture sets it clean
     app_config.settings.jwt_public_key = original_key
     app.dependency_overrides.clear()
     await engine.dispose()
