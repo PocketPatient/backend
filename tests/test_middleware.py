@@ -81,6 +81,33 @@ async def client_with_counting_redis(rsa_keys, test_db):
 
 
 @pytest.mark.asyncio
+async def test_error_responses_include_code(client):
+    """All error responses must include a 'code' field."""
+    resp = await client.get(
+        "/api/v1/courses/00000000-0000-0000-0000-000000000000",
+        headers={"Authorization": "Bearer bad"},
+    )
+    # bad JWT → 401
+    assert resp.status_code == 401
+    data = resp.json()
+    assert "code" in data
+    assert data["code"] == "UNAUTHORIZED"
+
+
+@pytest.mark.asyncio
+async def test_validation_error_includes_code(client):
+    """Pydantic validation errors (422) must include a 'code' field."""
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"wrong_field": "value"},
+    )
+    assert resp.status_code == 422
+    data = resp.json()
+    assert "code" in data
+    assert data["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
 async def test_rate_limit_auth_endpoint(client_with_counting_redis):
     """Auth endpoint: 20 req/min limit. 21st request gets 429."""
     client = client_with_counting_redis

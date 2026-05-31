@@ -268,7 +268,9 @@ async def test_confirm_with_parse_errors_returns_400(client, professor):
     )
     assert resp.status_code == 400
     body = resp.json()
-    assert "errors" in body["detail"] or "parse" in str(body["detail"]).lower()
+    # With the standardized error handler, dict-detail is spread to the top level
+    # (no "detail" wrapper); check "errors" or "message" directly on the body.
+    assert "errors" in body or "parse" in str(body).lower()
 
 
 async def test_confirm_when_file_missing_returns_410(client, professor):
