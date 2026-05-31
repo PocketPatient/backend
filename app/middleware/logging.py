@@ -23,8 +23,6 @@ class LoggingMiddleware(BaseHTTPMiddleware):
             status_code = response.status_code
             response.headers["X-Request-ID"] = request_id
             return response
-        except Exception:
-            raise
         finally:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
             logger.info(json.dumps({
