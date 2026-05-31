@@ -248,3 +248,40 @@ async def test_disease_pool_student_forbidden(client, setup):
         headers={"Authorization": f"Bearer {stu_token}"},
     )
     assert resp.status_code == 403
+
+
+async def test_list_units_professor_multiple_units_no_n1(client, clean_tables, professor, db_session):
+    """Regression: list_units must return correct data for multiple units."""
+    user, token = professor
+    course = Course(title="Multi-Unit Course", professor_id=user.id, class_code="MUC234")
+    db_session.add(course)
+    await db_session.flush()
+
+    unit_a = Unit(course_id=course.id, label="Unit A", status=UnitStatus.draft)
+    unit_b = Unit(course_id=course.id, label="Unit B", status=UnitStatus.draft)
+    db_session.add_all([unit_a, unit_b])
+    await db_session.flush()
+
+    db_session.add(Disease(
+        unit_id=unit_a.id, name="Disease A1", category="Mood", key_symptoms=["s1"],
+        differentials=["d1"], difficulty_tier=1, speech_style="flat",
+        nudge_behavior={"frequency": "low", "tone": "neutral", "example": ""},
+    ))
+    db_session.add(Disease(
+        unit_id=unit_b.id, name="Disease B1", category="Anxiety", key_symptoms=["s1"],
+        differentials=["d1"], difficulty_tier=2, speech_style="rapid",
+        nudge_behavior={"frequency": "high", "tone": "urgent", "example": ""},
+    ))
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/courses/{course.id}/units",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 2
+    labels = {u["label"] for u in data}
+    assert labels == {"Unit A", "Unit B"}
+    for unit_data in data:
+        assert unit_data["disease_count"] == 1

@@ -62,17 +62,24 @@ async def list_units(
             await db.execute(select(Unit).where(Unit.course_id == course_id))
         ).scalars().all()
 
-        result = []
-        for unit in units:
-            diseases = (
-                await db.execute(
-                    select(Disease).where(
-                        Disease.unit_id == unit.id, Disease.is_active == True  # noqa: E712
-                    )
+        if not units:
+            return []
+
+        unit_ids = [u.id for u in units]
+        all_diseases = (
+            await db.execute(
+                select(Disease).where(
+                    Disease.unit_id.in_(unit_ids),
+                    Disease.is_active == True,  # noqa: E712
                 )
-            ).scalars().all()
-            result.append(_make_unit_out(unit, diseases))
-        return result
+            )
+        ).scalars().all()
+
+        diseases_by_unit: dict[uuid.UUID, list[Disease]] = {u.id: [] for u in units}
+        for d in all_diseases:
+            diseases_by_unit[d.unit_id].append(d)
+
+        return [_make_unit_out(unit, diseases_by_unit[unit.id]) for unit in units]
 
     else:
         enrolled = (
