@@ -270,7 +270,8 @@ async def test_confirm_with_parse_errors_returns_400(client, professor):
     body = resp.json()
     # With the standardized error handler, dict-detail is spread to the top level
     # (no "detail" wrapper); check "errors" or "message" directly on the body.
-    assert "errors" in body or "parse" in str(body).lower()
+    assert isinstance(body.get("errors"), list) and len(body["errors"]) > 0
+    assert body.get("code") == "BAD_REQUEST"
 
 
 async def test_confirm_when_file_missing_returns_410(client, professor):

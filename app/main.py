@@ -54,7 +54,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
     code = _STATUS_TO_CODE.get(exc.status_code, "ERROR")
     detail = exc.detail
     if isinstance(detail, dict):
-        body = {**detail, "code": code}
+        body = {"code": code, **detail}
     else:
         body = {"detail": detail, "code": code}
     return JSONResponse(status_code=exc.status_code, content=body)
