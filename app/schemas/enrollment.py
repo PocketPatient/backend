@@ -12,6 +12,8 @@ class EnrollmentJoinRequest(BaseModel):
     @field_validator("class_code", mode="before")
     @classmethod
     def validate_class_code(cls, v: str) -> str:
+        if not isinstance(v, str):
+            raise ValueError("class_code must be a string")
         v = v.strip().upper()
         if len(v) != 6 or not v.isalnum():
             raise ValueError("class_code must be exactly 6 alphanumeric characters")

@@ -241,3 +241,13 @@ async def test_join_course_rejects_invalid_class_code(client, clean_tables, stud
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+async def test_join_course_rejects_null_class_code(client, clean_tables, student):
+    user, token = student
+    resp = await client.post(
+        "/api/v1/enrollments/join",
+        json={"class_code": None},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
