@@ -93,9 +93,20 @@ async def client(rsa_keys, test_db):
 
 
 async def _truncate_all():
-    """Open a fresh asyncpg connection (not pooled) to truncate tables."""
+    """Open a fresh asyncpg connection to truncate all tables.
+
+    Terminates any 'idle in transaction' connections first so TRUNCATE doesn't
+    block on locks left behind by previously killed pytest processes.
+    Only call this in fixture SETUP (before the test), not in teardown — calling
+    it in teardown deadlocks with the db_session fixture's open implicit transaction.
+    """
     conn = await asyncpg.connect(_ASYNCPG_DSN)
     try:
+        await conn.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND state = 'idle in transaction'"
+        )
         await conn.execute(
             "TRUNCATE TABLE messages, sessions, disease_documents, diseases, units, enrollments, courses, users CASCADE"
         )
@@ -105,10 +116,14 @@ async def _truncate_all():
 
 @pytest_asyncio.fixture
 async def clean_tables(test_db):
-    """Truncate all data before and after each test. Request this fixture in test files."""
+    """Truncate all data before each test. Request this fixture in test files.
+
+    Teardown is intentionally a no-op: calling _truncate_all() in teardown
+    deadlocks with the db_session fixture's teardown order. The next test's
+    setup truncate handles cleanup instead.
+    """
     await _truncate_all()
     yield
-    await _truncate_all()
 
 
 def _make_token(user_id: uuid.UUID, private_pem: str) -> str:
