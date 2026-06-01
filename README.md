@@ -114,7 +114,7 @@ The file is gitignored and must never be committed.
 
 ```powershell
 .venv\Scripts\activate   # if not already active
-alembic upgrade head
+uv run alembic upgrade head
 ```
 
 This creates all tables in the local Postgres instance.
@@ -123,7 +123,7 @@ This creates all tables in the local Postgres instance.
 
 ```powershell
 .venv\Scripts\activate
-python scripts/seed_test_users.py
+uv run python scripts/seed_test_users.py
 ```
 
 This creates `student@test.pocketpatient.dev` and `professor@test.pocketpatient.dev` in both Firebase and PostgreSQL with roles pre-set. Requires `allow_test_accounts=true` in `.env`.
@@ -134,7 +134,7 @@ This creates `student@test.pocketpatient.dev` and `professor@test.pocketpatient.
 
 ```powershell
 .venv\Scripts\activate
-uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8000
 ```
 
 - API: `http://localhost:8000/api/v1`
@@ -234,21 +234,27 @@ tests/                         # pytest test suite
 
 ```powershell
 # Apply all pending migrations
-alembic upgrade head
+uv run alembic upgrade head
 
 # Roll back one migration
-alembic downgrade -1
+uv run alembic downgrade -1
 
 # Auto-generate a new migration after model changes
-alembic revision --autogenerate -m "describe what changed"
+uv run alembic revision --autogenerate -m "describe what changed"
 ```
 
 ---
 
 ## Testing
 
+Tests run against a separate `pocketpatient_test` database (must exist — create it once with `createdb pocketpatient_test` or via psql). Tables are created and dropped automatically by the test suite; do not run migrations against it.
+
 ```powershell
-pytest
+# Full suite
+uv run pytest -v
+
+# Single file
+uv run pytest tests/test_<name>.py -v
 ```
 
 ---
@@ -281,7 +287,7 @@ To create them on a fresh local database, run:
 
 ```powershell
 .venv\Scripts\activate
-python scripts/seed_test_users.py
+uv run python scripts/seed_test_users.py
 ```
 
 Requires `allow_test_accounts=true` in `.env` (already set in the default `.env`). This flag is `False` by default and must never be enabled in production.
