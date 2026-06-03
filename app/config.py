@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     allow_test_accounts: bool = False  # set True in .env for local dev only
     jwt_private_key: str = ""
     jwt_public_key: str = ""
+    gemini_api_key: str = ""
 
     @field_validator("jwt_private_key", "jwt_public_key", mode="before")
     @classmethod
