@@ -94,6 +94,12 @@ class _LazyGateway:
         self._instance: LLMGateway | None = None
 
     def __getattr__(self, name: str):  # noqa: ANN204
+        # Only forward attributes that actually exist on LLMGateway.
+        # This prevents accidental LLMGateway construction during introspection
+        # by unittest.mock, inspect.iscoroutinefunction, etc., which probe for
+        # attributes like _is_coroutine_marker, __func__, etc.
+        if not hasattr(LLMGateway, name):
+            raise AttributeError(name)
         if self._instance is None:
             self._instance = LLMGateway()
         return getattr(self._instance, name)
