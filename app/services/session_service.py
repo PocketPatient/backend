@@ -86,7 +86,7 @@ async def get_session_messages(session_id: uuid.UUID, db: AsyncSession) -> list[
     result = await db.execute(
         select(Message)
         .where(Message.session_id == session_id)
-        .order_by(Message.sent_at.asc())
+        .order_by(Message.sent_at.asc(), Message.created_at.asc())
     )
     return list(result.scalars().all())
 

@@ -142,9 +142,11 @@ async def test_get_session_messages_returns_ordered(db_session, setup):
     db_session.add(session)
     await db_session.flush()
 
-    now = datetime.now(timezone.utc)
-    m1 = Message(session_id=session.id, role=MessageRole.patient, content="Hi", sent_at=now, is_nudge=False)
-    m2 = Message(session_id=session.id, role=MessageRole.student, content="Hello", sent_at=now, is_nudge=False)
+    from datetime import timedelta
+    t1 = datetime.now(timezone.utc)
+    t2 = t1 + timedelta(seconds=5)
+    m1 = Message(session_id=session.id, role=MessageRole.patient, content="Hi", sent_at=t1, is_nudge=False)
+    m2 = Message(session_id=session.id, role=MessageRole.student, content="Hello", sent_at=t2, is_nudge=False)
     db_session.add_all([m1, m2])
     await db_session.commit()
 
@@ -152,3 +154,60 @@ async def test_get_session_messages_returns_ordered(db_session, setup):
     messages = await get_session_messages(session.id, db_session)
 
     assert len(messages) == 2
+    assert messages[0].content == "Hi"
+    assert messages[1].content == "Hello"
+
+
+async def test_send_student_message_and_get_reply(db_session, setup):
+    _, stu, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active, turn_count=0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    opening = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(opening)
+    await db_session.commit()
+    await db_session.refresh(session)
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_patient_message = AsyncMock(return_value="I feel really low.")
+        from app.services.session_service import send_student_message_and_get_reply
+        patient_reply = await send_student_message_and_get_reply(
+            session, "Tell me more about your symptoms.", db_session
+        )
+
+    # Patient reply is returned
+    assert patient_reply.role == MessageRole.patient
+    assert patient_reply.content == "I feel really low."
+
+    # turn_count incremented
+    await db_session.refresh(session)
+    assert session.turn_count == 1
+
+    # Student message recorded with latency
+    from sqlalchemy import select
+    from app.models.message import Message as Msg
+    all_msgs = (
+        await db_session.execute(
+            select(Msg).where(Msg.session_id == session.id).order_by(Msg.sent_at.asc(), Msg.created_at.asc())
+        )
+    ).scalars().all()
+    assert len(all_msgs) == 3  # opening + student + patient reply
+    student_msg = all_msgs[1]
+    assert student_msg.role == MessageRole.student
+    assert student_msg.content == "Tell me more about your symptoms."
+    assert student_msg.response_latency_sec is not None
+    assert student_msg.response_latency_sec >= 0
+
+    # LLM was called with correct conversation history
+    call_args = mock_gw.generate_patient_message.call_args
+    history = call_args.args[3] if len(call_args.args) > 3 else call_args.kwargs.get("conversation_history")
+    assert history is not None
+    assert any(h["role"] == "user" for h in history)
