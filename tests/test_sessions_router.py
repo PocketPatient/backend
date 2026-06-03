@@ -1,0 +1,130 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+import pytest_asyncio
+
+from app.models.course import Course
+from app.models.disease import Disease
+from app.models.enrollment import Enrollment
+from app.models.message import Message, MessageRole
+from app.models.session import Session, SessionStatus
+from app.models.unit import Unit, UnitStatus
+from app.models.user import User, UserRole
+
+pytestmark = pytest.mark.usefixtures("clean_tables")
+
+_NUDGE = {"frequency": "low", "tone": "neutral", "example": ""}
+
+
+@pytest_asyncio.fixture
+async def setup(professor, student, db_session):
+    prof, prof_token = professor
+    stu, stu_token = student
+
+    course = Course(title="Psych 101", professor_id=prof.id, class_code="SES123", is_active=True)
+    db_session.add(course)
+    await db_session.flush()
+
+    enrollment = Enrollment(user_id=stu.id, course_id=course.id)
+    db_session.add(enrollment)
+
+    unit = Unit(
+        course_id=course.id, label="Unit 1",
+        status=UnitStatus.released, release_date=datetime.now(timezone.utc),
+    )
+    db_session.add(unit)
+    await db_session.flush()
+
+    disease = Disease(
+        unit_id=unit.id, name="GAD", category="Anxiety",
+        key_symptoms=["worry"], differentials=["MDD"],
+        difficulty_tier=2, speech_style="anxious", nudge_behavior=_NUDGE,
+    )
+    db_session.add(disease)
+    await db_session.commit()
+    await db_session.refresh(disease)
+    await db_session.refresh(course)
+
+    return prof, prof_token, stu, stu_token, course, disease
+
+
+async def test_create_session_student_enrolled(client, setup):
+    _, _, _, stu_token, course, _ = setup
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hi, I need help.")
+        resp = await client.post(
+            "/api/v1/sessions",
+            json={"course_id": str(course.id)},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["status"] == "active"
+    assert data["turn_count"] == 0
+    assert len(data["messages"]) == 1
+    assert data["messages"][0]["role"] == "patient"
+    assert data["messages"][0]["content"] == "Hi, I need help."
+
+
+async def test_create_session_professor_forbidden(client, setup):
+    _, prof_token, _, _, course, _ = setup
+
+    resp = await client.post(
+        "/api/v1/sessions",
+        json={"course_id": str(course.id)},
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_create_session_duplicate_returns_409(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    existing = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(existing)
+    await db_session.commit()
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hello.")
+        resp = await client.post(
+            "/api/v1/sessions",
+            json={"course_id": str(course.id)},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 409
+
+
+async def test_create_session_not_enrolled_returns_404(client, setup, db_session, rsa_keys):
+    _, _, _, _, course, _ = setup
+    private_pem, _ = rsa_keys
+
+    other_stu = User(
+        google_uid=f"x-{uuid.uuid4().hex}",
+        email=f"x-{uuid.uuid4().hex[:8]}@test.edu",
+        role=UserRole.student, is_verified=True,
+        display_name="Other",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other_stu)
+    await db_session.commit()
+
+    from jose import jwt
+    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+
+    resp = await client.post(
+        "/api/v1/sessions",
+        json={"course_id": str(course.id)},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 404

@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import settings
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
-from app.routers import auth, courses, disease_documents, enrollments, units, users
+from app.routers import auth, courses, disease_documents, enrollments, sessions, units, users
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -82,6 +82,7 @@ app.include_router(courses.router, prefix="/api/v1")
 app.include_router(disease_documents.router, prefix="/api/v1")
 app.include_router(enrollments.router, prefix="/api/v1")
 app.include_router(units.router, prefix="/api/v1")
+app.include_router(sessions.router, prefix="/api/v1")
 
 
 @app.get("/health")
