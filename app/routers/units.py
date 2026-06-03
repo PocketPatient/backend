@@ -101,25 +101,29 @@ async def list_units(
             )
         ).scalars().all()
 
-        result = []
-        for unit in units:
-            count = (
-                await db.execute(
-                    select(func.count()).select_from(Disease).where(
-                        Disease.unit_id == unit.id, Disease.is_active == True  # noqa: E712
-                    )
-                )
-            ).scalar_one()
-            result.append(
-                UnitOutStudent(
-                    id=unit.id,
-                    label=unit.label,
-                    status=unit.status,
-                    release_date=unit.release_date,
-                    disease_count=count,
-                )
+        if not units:
+            return []
+
+        unit_ids = [u.id for u in units]
+        counts_rows = (
+            await db.execute(
+                select(Disease.unit_id, func.count().label("cnt"))
+                .where(Disease.unit_id.in_(unit_ids), Disease.is_active == True)  # noqa: E712
+                .group_by(Disease.unit_id)
             )
-        return result
+        ).all()
+        counts_by_unit: dict[uuid.UUID, int] = {row.unit_id: row.cnt for row in counts_rows}
+
+        return [
+            UnitOutStudent(
+                id=unit.id,
+                label=unit.label,
+                status=unit.status,
+                release_date=unit.release_date,
+                disease_count=counts_by_unit.get(unit.id, 0),
+            )
+            for unit in units
+        ]
 
 
 async def _get_owned_unit(

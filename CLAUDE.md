@@ -27,6 +27,7 @@ FastAPI + SQLAlchemy 2.0 async + Postgres backend for a psychiatry-training app 
 ## Key conventions
 - Routers do auth via `Depends(require_role(...))`; ownership checks return **404** (not 403) to avoid leaking existence
 - Tests follow TDD: write failing test → minimal impl → green → commit
+- `clean_tables` fixture truncates in **setup only** — teardown is a no-op. Never call `_truncate_all()` in teardown: fixture teardown runs `clean_tables` before `db_session`, so TRUNCATE (ACCESS EXCLUSIVE) deadlocks against `db_session`'s idle-in-transaction SHARE lock. The next test's setup handles cleanup instead. `_truncate_all()` also calls `pg_terminate_backend` on idle-in-transaction connections at setup to clear connections left by killed pytest processes.
 - File storage is local `/tmp/pocketpatient-uploads/` for dev — GCS seam is `app/services/file_storage.py`
 - Class codes are 6-char uppercase, no ambiguous chars (0/O/1/I/L)
 
