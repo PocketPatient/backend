@@ -117,5 +117,9 @@ async def test_patient_identity_varies_by_seed():
     name1, age1 = patient_identity(111)
     name2, age2 = patient_identity(999999)
 
-    # Different seeds should produce different results (extremely unlikely to collide)
+    # Pinned expected values — deterministic by seed
+    assert name1 == "James"
+    assert age1 == 45
+    assert name2 == "James"
+    assert age2 == 40
     assert (name1, age1) != (name2, age2)

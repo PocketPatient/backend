@@ -31,7 +31,7 @@ class LLMGateway:
         self.model = "gemini-2.5-flash"
 
     def _build_system_prompt(self, disease: Disease, patient_name: str, patient_age: int) -> str:
-        symptoms = ", ".join(disease.key_symptoms)
+        symptoms = ", ".join(disease.key_symptoms) if disease.key_symptoms else "various symptoms"
         dsm_part = f" ({disease.dsm_code})" if disease.dsm_code else ""
         return (
             f"You are a patient named {patient_name}, {patient_age} years old.\n"
@@ -90,15 +90,13 @@ class LLMGateway:
 class _LazyGateway:
     """Module-level singleton proxy; constructs the real LLMGateway on first attribute access."""
 
-    _instance: LLMGateway | None = None
-
-    def _get(self) -> LLMGateway:
-        if self._instance is None:
-            self._instance = LLMGateway()
-        return self._instance
+    def __init__(self) -> None:
+        self._instance: LLMGateway | None = None
 
     def __getattr__(self, name: str):  # noqa: ANN204
-        return getattr(self._get(), name)
+        if self._instance is None:
+            self._instance = LLMGateway()
+        return getattr(self._instance, name)
 
 
 gateway = _LazyGateway()
