@@ -45,6 +45,51 @@ def _session_out(session: Session, messages: list[Message]) -> SessionOut:
     )
 
 
+@router.get("/active", response_model=SessionOut)
+async def get_active_session_endpoint(
+    course_id: uuid.UUID,
+    current_user: User = Depends(require_role("student")),
+    db: AsyncSession = Depends(get_db),
+) -> SessionOut:
+    session = await get_active_session(current_user.id, course_id, db)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No active session")
+    messages = await get_session_messages(session.id, db)
+    return _session_out(session, messages)
+
+
+@router.get("/{session_id}", response_model=SessionOut)
+async def get_session(
+    session_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> SessionOut:
+    session = (
+        await db.execute(select(Session).where(Session.id == session_id))
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if current_user.role == UserRole.student:
+        if session.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Session not found")
+    else:
+        # Professor: must own the course this session belongs to
+        course = (
+            await db.execute(
+                select(Course).where(
+                    Course.id == session.course_id,
+                    Course.professor_id == current_user.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = await get_session_messages(session.id, db)
+    return _session_out(session, messages)
+
+
 @router.post("", response_model=SessionOut, status_code=201)
 async def create_session(
     body: SessionCreate,

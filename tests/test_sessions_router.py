@@ -128,3 +128,115 @@ async def test_create_session_not_enrolled_returns_404(client, setup, db_session
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert resp.status_code == 404
+
+
+async def test_get_active_session_returns_session(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    msg = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(msg)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/active?course_id={course.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "active"
+    assert len(data["messages"]) == 1
+    assert data["messages"][0]["content"] == "Hi doc."
+
+
+async def test_get_active_session_none_returns_404(client, setup):
+    _, _, _, stu_token, course, _ = setup
+
+    resp = await client.get(
+        f"/api/v1/sessions/active?course_id={course.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_get_session_by_id_student_owner(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    msg = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hello.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(msg)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert str(data["id"]) == str(session.id)
+    assert len(data["messages"]) == 1
+
+
+async def test_get_session_by_id_professor_of_course(client, setup, db_session):
+    prof, prof_token, stu, _, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    assert resp.status_code == 200
+
+
+async def test_get_session_by_id_unauthorized_user_returns_404(client, setup, db_session, rsa_keys):
+    _, _, stu, _, course, disease = setup
+    private_pem, _ = rsa_keys
+
+    other_stu = User(
+        google_uid=f"oth-{uuid.uuid4().hex}",
+        email=f"oth-{uuid.uuid4().hex[:8]}@test.edu",
+        role=UserRole.student, is_verified=True,
+        display_name="Other",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other_stu)
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    from jose import jwt
+    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 404
