@@ -90,6 +90,36 @@ async def get_session(
     return _session_out(session, messages)
 
 
+@router.post("/{session_id}/messages", response_model=MessageOut, status_code=201)
+async def send_message(
+    session_id: uuid.UUID,
+    body: MessageCreate,
+    current_user: User = Depends(require_role("student")),
+    db: AsyncSession = Depends(get_db),
+) -> MessageOut:
+    session = (
+        await db.execute(
+            select(Session).where(
+                Session.id == session_id,
+                Session.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != SessionStatus.active:
+        raise HTTPException(status_code=409, detail="Session is not active")
+
+    patient_reply = await send_student_message_and_get_reply(session, body.content, db)
+    return MessageOut(
+        id=patient_reply.id,
+        role=patient_reply.role,
+        content=patient_reply.content,
+        sent_at=patient_reply.sent_at,
+        response_latency_sec=patient_reply.response_latency_sec,
+    )
+
+
 @router.post("", response_model=SessionOut, status_code=201)
 async def create_session(
     body: SessionCreate,

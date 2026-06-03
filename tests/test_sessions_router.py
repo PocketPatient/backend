@@ -240,3 +240,133 @@ async def test_get_session_by_id_unauthorized_user_returns_404(client, setup, db
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert resp.status_code == 404
+
+
+async def test_send_message_returns_patient_reply(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    opening = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(opening)
+    await db_session.commit()
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_patient_message = AsyncMock(return_value="My mood has been really low.")
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/messages",
+            json={"content": "Tell me how you've been feeling."},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["role"] == "patient"
+    assert data["content"] == "My mood has been really low."
+
+
+async def test_send_message_increments_turn_count(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active, turn_count=0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    opening = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(opening)
+    await db_session.commit()
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_patient_message = AsyncMock(return_value="Feeling low.")
+        await client.post(
+            f"/api/v1/sessions/{session.id}/messages",
+            json={"content": "How are you?"},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.json()["turn_count"] == 1
+
+
+async def test_send_message_session_not_active_returns_409(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.diagnosed,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/messages",
+        json={"content": "Hello"},
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 409
+
+
+async def test_send_message_professor_forbidden(client, setup, db_session):
+    prof, prof_token, stu, _, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/messages",
+        json={"content": "Hello"},
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_send_message_not_owner_returns_404(client, setup, db_session, rsa_keys):
+    _, _, stu, _, course, disease = setup
+    private_pem, _ = rsa_keys
+
+    other_stu = User(
+        google_uid=f"msg-{uuid.uuid4().hex}",
+        email=f"msg-{uuid.uuid4().hex[:8]}@test.edu",
+        role=UserRole.student, is_verified=True,
+        display_name="Other",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other_stu)
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    from jose import jwt
+    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/messages",
+        json={"content": "Hello"},
+        headers={"Authorization": f"Bearer {other_token}"},
+    )
+    assert resp.status_code == 404
