@@ -105,6 +105,49 @@ async def test_create_new_session_raises_if_no_disease_pool(db_session, setup):
     assert exc_info.value.status_code == 422
 
 
+async def test_only_one_active_session_per_user_course(db_session, setup):
+    from sqlalchemy.exc import IntegrityError
+
+    _, stu, course, disease = setup
+    now = datetime.now(timezone.utc)
+
+    s1 = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=now, status=SessionStatus.active,
+    )
+    db_session.add(s1)
+    await db_session.commit()
+
+    s2 = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=now, status=SessionStatus.active,
+    )
+    db_session.add(s2)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
+    await db_session.rollback()
+
+
+async def test_non_active_sessions_do_not_block_a_new_active_one(db_session, setup):
+    _, stu, course, disease = setup
+    now = datetime.now(timezone.utc)
+
+    done = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=now, status=SessionStatus.diagnosed,
+    )
+    db_session.add(done)
+    await db_session.commit()
+
+    fresh = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=now, status=SessionStatus.active,
+    )
+    db_session.add(fresh)
+    await db_session.commit()  # must not raise — partial index only covers active
+    assert fresh.id is not None
+
+
 async def test_get_active_session_returns_active(db_session, setup):
     _, stu, course, disease = setup
 

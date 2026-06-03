@@ -181,6 +181,45 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 
 ---
 
+## Sessions
+
+| Method | Path | Description | Auth | Status |
+|--------|------|-------------|------|--------|
+| POST | `/api/v1/sessions` | Start a new case — picks a disease, generates the AI patient's opening message | Bearer JWT (student) | ✅ Week 7 |
+| GET | `/api/v1/sessions/active?course_id={id}` | Active session for this course (with messages) | Bearer JWT (student) | ✅ Week 7 |
+| GET | `/api/v1/sessions/{session_id}` | Session detail with all messages | Bearer JWT (owner or course professor) | ✅ Week 7 |
+| POST | `/api/v1/sessions/{session_id}/messages` | Send a student reply; returns the AI patient's response | Bearer JWT (student owner, active session) | ✅ Week 7 |
+
+`SessionOut` — id, disease_id, course_id, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`).
+`MessageOut` — id, role (`student`/`patient`/`system`), content, sent_at, response_latency_sec.
+
+### POST /api/v1/sessions
+**Role required:** student (must be enrolled in the course)
+**Request:** `{"course_id": "uuid"}`
+**Behavior:** Selects a random disease from the course's released-unit pool, creates an `active` session, and calls the LLM to generate the patient's opening message. A student may have at most one active session per course (enforced by a partial unique index).
+**Response (201):** `SessionOut` with a single patient message.
+**Errors:** 401 unauthenticated, 403 not a student, 404 not enrolled in course, 409 active session already exists for this course, 422 no diseases in the course pool, 502 LLM returned an empty response
+
+### GET /api/v1/sessions/active
+**Role required:** student
+**Query:** `course_id` (uuid, required)
+**Response (200):** `SessionOut` for the active session, messages ordered by `sent_at`.
+**Errors:** 401 unauthenticated, 403 not a student, 404 no active session for this course
+
+### GET /api/v1/sessions/{session_id}
+**Auth:** session owner (student) **or** the professor who owns the session's course.
+**Response (200):** `SessionOut` with all messages.
+**Errors:** 401 unauthenticated, 404 not found or caller not authorized (existence not leaked)
+
+### POST /api/v1/sessions/{session_id}/messages
+**Role required:** student (must own the session; session must be `active`)
+**Request:** `{"content": "Tell me more about your symptoms"}` (non-empty)
+**Behavior:** Records the student message with `response_latency_sec` (seconds since the last patient message), then calls the LLM for the patient's reply and increments `turn_count`. The student message is committed before the LLM call, so a gateway failure does not discard it.
+**Response (201):** `MessageOut` — the patient's reply.
+**Errors:** 401 unauthenticated, 403 not a student, 404 not found or not owner, 409 session is not active, 422 empty content, 502 LLM returned an empty response
+
+---
+
 ## Health
 
 | Method | Path | Description | Status |

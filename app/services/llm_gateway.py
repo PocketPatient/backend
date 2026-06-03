@@ -5,7 +5,7 @@ import random
 
 from fastapi import HTTPException
 from google import genai
-from google.genai.types import GenerateContentConfig
+from google.genai.types import GenerateContentConfig, ThinkingConfig
 
 from app.config import settings
 from app.models.disease import Disease
@@ -30,6 +30,17 @@ class LLMGateway:
     def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.gemini_api_key)
         self.model = "gemini-2.5-flash"
+
+    def _gen_config(self, system_prompt: str) -> GenerateContentConfig:
+        # gemini-2.5-flash is a thinking model; with a low token cap the
+        # reasoning can consume the whole budget and leave response.text empty.
+        # Disable thinking and give visible output room to breathe.
+        return GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=0.8,
+            max_output_tokens=800,
+            thinking_config=ThinkingConfig(thinking_budget=0),
+        )
 
     def _build_system_prompt(self, disease: Disease, patient_name: str, patient_age: int) -> str:
         symptoms = ", ".join(disease.key_symptoms) if disease.key_symptoms else "various symptoms"
@@ -59,11 +70,7 @@ class LLMGateway:
             self.client.models.generate_content,
             model=self.model,
             contents=contents,
-            config=GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.8,
-                max_output_tokens=300,
-            ),
+            config=self._gen_config(system_prompt),
         )
         if not response.text:
             raise HTTPException(status_code=502, detail="LLM returned empty response")
@@ -81,11 +88,7 @@ class LLMGateway:
             self.client.models.generate_content,
             model=self.model,
             contents=conversation_history,
-            config=GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.8,
-                max_output_tokens=300,
-            ),
+            config=self._gen_config(system_prompt),
         )
         if not response.text:
             raise HTTPException(status_code=502, detail="LLM returned empty response")

@@ -126,7 +126,9 @@ async def send_student_message_and_get_reply(
         response_latency_sec=latency,
     )
     db.add(student_msg)
-    await db.flush()
+    # Commit the student's message before calling the LLM so a gateway failure
+    # (502/timeout) doesn't roll it back and force the student to retype.
+    await db.commit()
 
     all_messages = await get_session_messages(session.id, db)
     history = [

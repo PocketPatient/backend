@@ -66,6 +66,67 @@ async def test_generate_opening_message_system_prompt_contains_disease(mock_gena
 
 
 @pytest.mark.asyncio
+async def test_generate_opening_message_disables_thinking_and_raises_tokens(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    gw = LLMGateway()
+
+    await gw.generate_opening_message(_make_disease(), "Sarah", 34)
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    assert config.max_output_tokens == 800
+    assert config.thinking_config is not None
+    assert config.thinking_config.thinking_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_patient_message_disables_thinking_and_raises_tokens(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    gw = LLMGateway()
+    history = [{"role": "user", "parts": [{"text": "How are you?"}]}]
+
+    await gw.generate_patient_message(_make_disease(), "Sarah", 34, history)
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    assert config.max_output_tokens == 800
+    assert config.thinking_config is not None
+    assert config.thinking_config.thinking_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_generate_opening_message_empty_response_raises_502(mock_genai):
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = None
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.generate_opening_message(_make_disease(), "Sarah", 34)
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_generate_patient_message_empty_response_raises_502(mock_genai):
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = ""
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.generate_patient_message(_make_disease(), "Sarah", 34, [])
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
 async def test_generate_opening_message_no_dsm_code(mock_genai):
     from app.services.llm_gateway import LLMGateway
 

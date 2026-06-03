@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, func
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,6 +18,16 @@ class SessionStatus(str, PyEnum):
 
 class Session(Base):
     __tablename__ = "sessions"
+    __table_args__ = (
+        # A student may have at most one active session per course at a time.
+        Index(
+            "uq_one_active_session_per_user_course",
+            "user_id",
+            "course_id",
+            unique=True,
+            postgresql_where=text("status = 'active'"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     disease_id: Mapped[uuid.UUID] = mapped_column(

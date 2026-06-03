@@ -305,6 +305,66 @@ async def test_send_message_increments_turn_count(client, setup, db_session):
     assert resp.json()["turn_count"] == 1
 
 
+async def test_send_message_empty_content_returns_422(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/messages",
+        json={"content": ""},
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_send_message_persists_student_msg_when_llm_fails(client, setup, db_session):
+    from fastapi import HTTPException
+
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active, turn_count=0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    opening = Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    )
+    db_session.add(opening)
+    await db_session.commit()
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_patient_message = AsyncMock(
+            side_effect=HTTPException(status_code=502, detail="LLM down")
+        )
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/messages",
+            json={"content": "I have been very anxious lately."},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+    assert resp.status_code == 502
+
+    # The student's message must survive the failed LLM call.
+    resp2 = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    data = resp2.json()
+    contents = [m["content"] for m in data["messages"]]
+    assert "I have been very anxious lately." in contents
+    # No patient reply was added and the turn was not counted.
+    assert [m["role"] for m in data["messages"]].count("patient") == 1
+    assert data["turn_count"] == 0
+
+
 async def test_send_message_session_not_active_returns_409(client, setup, db_session):
     _, _, stu, stu_token, course, disease = setup
 
