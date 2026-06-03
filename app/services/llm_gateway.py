@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 
+from fastapi import HTTPException
 from google import genai
 from google.genai.types import GenerateContentConfig
 
@@ -64,6 +65,8 @@ class LLMGateway:
                 max_output_tokens=300,
             ),
         )
+        if not response.text:
+            raise HTTPException(status_code=502, detail="LLM returned empty response")
         return response.text
 
     async def generate_patient_message(
@@ -84,6 +87,8 @@ class LLMGateway:
                 max_output_tokens=300,
             ),
         )
+        if not response.text:
+            raise HTTPException(status_code=502, detail="LLM returned empty response")
         return response.text
 
 
