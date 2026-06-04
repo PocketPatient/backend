@@ -173,8 +173,9 @@ on empty/unparseable output — matching the existing convention.
   ```
   - `primary_dx`: `str`, `min_length=1`
   - `differentials`: `list[str]`, default `[]`, `max_length=3`
-  - `justification`: `str` (no min length enforced server-side; frontend enforces
-    its 50-char UX rule)
+  - `justification`: `str`, `min_length=50` (enforced server-side — never trust
+    the client; a "idk" justification is rejected with 422 even if the frontend
+    has a bug. The frontend enforces the same 50-char rule for UX.)
 
 ### Correct path
 1. `grade_diagnosis(...)` returns a `Score` with `is_correct=True`.
@@ -231,7 +232,7 @@ rubric_score, response_time_score, total_score, feedback_text, graded_at`.
 | Not a student | 403 (from `require_role`) |
 | Session not found / not owned | 404 |
 | Session not `active` | 409 |
-| Invalid body (empty primary_dx, >3 differentials) | 422 |
+| Invalid body (empty primary_dx, >3 differentials, justification <50 chars) | 422 |
 | Gemini empty/unparseable | 502 |
 
 ---
@@ -256,7 +257,7 @@ rubric_score, response_time_score, total_score, feedback_text, graded_at`.
 - Diagnose incorrect: `correct:false`, `hint` present, **no** `scores` row,
   session still `active`.
 - 409 when session not active; 404 when not owner; 403 for professor;
-  422 for empty `primary_dx` and for >3 differentials.
+  422 for empty `primary_dx`, for >3 differentials, and for justification <50 chars.
 - `GET /sessions/{id}`: reveal+score present once diagnosed; both `null` while
   active.
 
