@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import random
 
 from fastapi import HTTPException
 from google import genai
 from google.genai.types import GenerateContentConfig, ThinkingConfig
+from pydantic import BaseModel as _PydBaseModel
 
 from app.config import settings
 from app.models.disease import Disease
@@ -16,6 +18,12 @@ _PATIENT_NAMES = [
 ]
 
 _OPENING_PROMPT = "Generate your first message reaching out to a doctor for help."
+
+
+class _GradingSchema(_PydBaseModel):
+    is_correct: bool
+    rubric_score: float
+    feedback: str
 
 
 def patient_identity(session_id_int: int) -> tuple[str, int]:
@@ -92,6 +100,78 @@ class LLMGateway:
         )
         if not response.text:
             raise HTTPException(status_code=502, detail="LLM returned empty response")
+        return response.text
+
+    def _build_grading_prompt(self, disease: Disease, submission, transcript: str) -> str:
+        dsm = disease.dsm_code or "no DSM code"
+        differentials = ", ".join(submission.differentials) if submission.differentials else "none"
+        return (
+            "You are a clinical evaluation system. The student was diagnosing a patient "
+            f"with {disease.name} ({dsm}).\n\n"
+            "The student's diagnosis:\n"
+            f"- Primary: {submission.primary_dx}\n"
+            f"- Differentials: {differentials}\n"
+            f"- Justification: {submission.justification}\n\n"
+            f"The conversation transcript:\n{transcript}\n\n"
+            "Evaluate:\n"
+            "1. Is the primary diagnosis correct? (exact match or clinically equivalent)\n"
+            "2. Are any differentials correct?\n"
+            "3. Quality of justification (does it reference specific symptoms from the conversation?)\n\n"
+            'Respond in JSON: {"is_correct": bool, "rubric_score": 0-100, '
+            '"feedback": "specific constructive feedback"}'
+        )
+
+    async def grade_diagnosis(self, disease: Disease, submission, transcript: str) -> dict:
+        prompt = self._build_grading_prompt(disease, submission, transcript)
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        config = GenerateContentConfig(
+            temperature=0.3,
+            max_output_tokens=800,
+            thinking_config=ThinkingConfig(thinking_budget=0),
+            response_mime_type="application/json",
+            response_schema=_GradingSchema,
+        )
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
+            model=self.model,
+            contents=contents,
+            config=config,
+        )
+        if not response.text:
+            raise HTTPException(status_code=502, detail="LLM returned empty grading response")
+        try:
+            data = json.loads(response.text)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise HTTPException(
+                status_code=502, detail="LLM returned malformed grading response"
+            ) from exc
+        rubric = max(0.0, min(100.0, float(data.get("rubric_score", 0))))
+        return {
+            "is_correct": bool(data.get("is_correct", False)),
+            "rubric_score": rubric,
+            "feedback": str(data.get("feedback", "")),
+        }
+
+    async def generate_hint(self, wrong_dx: str, actual_dx: str) -> str:
+        prompt = (
+            f"The student guessed {wrong_dx}. The actual condition is {actual_dx}. "
+            "Give a subtle hint that redirects the student without revealing the answer. "
+            f"Do not name {actual_dx} or any obvious synonym. Keep it to one or two sentences."
+        )
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        config = GenerateContentConfig(
+            temperature=0.7,
+            max_output_tokens=200,
+            thinking_config=ThinkingConfig(thinking_budget=0),
+        )
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
+            model=self.model,
+            contents=contents,
+            config=config,
+        )
+        if not response.text:
+            raise HTTPException(status_code=502, detail="LLM returned empty hint")
         return response.text
 
 

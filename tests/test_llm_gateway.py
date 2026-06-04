@@ -184,3 +184,116 @@ async def test_patient_identity_varies_by_seed():
     assert name2 == "James"
     assert age2 == 40
     assert (name1, age1) != (name2, age2)
+
+
+def _make_submission(primary_dx="Major Depressive Disorder",
+                     differentials=None, justification="x" * 60):
+    from unittest.mock import MagicMock
+    s = MagicMock()
+    s.primary_dx = primary_dx
+    s.differentials = differentials if differentials is not None else ["Bipolar II"]
+    s.justification = justification
+    return s
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_parses_json(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = (
+        '{"is_correct": true, "rubric_score": 88, "feedback": "Solid reasoning."}'
+    )
+    gw = LLMGateway()
+
+    result = await gw.grade_diagnosis(_make_disease(), _make_submission(), "Patient: hi\nStudent: hello")
+
+    assert result == {"is_correct": True, "rubric_score": 88.0, "feedback": "Solid reasoning."}
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_uses_json_output_and_disables_thinking(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = (
+        '{"is_correct": false, "rubric_score": 40, "feedback": "x"}'
+    )
+    gw = LLMGateway()
+
+    await gw.grade_diagnosis(_make_disease(), _make_submission(), "transcript")
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    assert config.response_mime_type == "application/json"
+    assert config.thinking_config.thinking_budget == 0
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_clamps_rubric_score(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = (
+        '{"is_correct": true, "rubric_score": 140, "feedback": "x"}'
+    )
+    gw = LLMGateway()
+
+    result = await gw.grade_diagnosis(_make_disease(), _make_submission(), "t")
+    assert result["rubric_score"] == 100.0
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_empty_raises_502(mock_genai):
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = ""
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.grade_diagnosis(_make_disease(), _make_submission(), "t")
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_malformed_json_raises_502(mock_genai):
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = "not json at all"
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.grade_diagnosis(_make_disease(), _make_submission(), "t")
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_generate_hint_returns_text(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = "Look more closely at the sleep pattern."
+    gw = LLMGateway()
+
+    result = await gw.generate_hint("Generalized Anxiety Disorder", "Major Depressive Disorder")
+    assert result == "Look more closely at the sleep pattern."
+
+
+@pytest.mark.asyncio
+async def test_generate_hint_empty_raises_502(mock_genai):
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = None
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.generate_hint("GAD", "MDD")
+    assert exc.value.status_code == 502
