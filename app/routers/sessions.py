@@ -80,6 +80,8 @@ async def _load_reveal(
     unit = (
         await db.execute(select(Unit).where(Unit.id == disease.unit_id))
     ).scalar_one()
+    # A diagnosed session normally has a Score row; if one is somehow missing we
+    # still reveal the disease/unit (the answer is no longer secret) with score=None.
     score_out = ScoreOut.model_validate(score_row) if score_row is not None else None
     reveal = RevealOut(
         disease_name=disease.name,

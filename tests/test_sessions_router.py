@@ -640,3 +640,27 @@ async def test_get_session_active_hides_reveal(client, setup, db_session):
     data = resp.json()
     assert data["score"] is None
     assert data["reveal"] is None
+
+
+async def test_get_session_diagnosed_professor_sees_reveal(client, setup, db_session):
+    _, prof_token, stu, _, course, disease = setup
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc),
+                      status=SessionStatus.diagnosed,
+                      completed_at=datetime.now(timezone.utc))
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Score(session_id=session.id, primary_dx="GAD", differentials=["MDD"],
+                         justification="x" * 60, is_correct=True, rubric_score=90.0,
+                         response_time_score=100.0, total_score=93.0,
+                         feedback_text="Great.", graded_at=datetime.now(timezone.utc)))
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["reveal"]["disease_name"] == "GAD"
+    assert data["score"]["total_score"] == 93.0
