@@ -569,3 +569,32 @@ async def test_diagnose_short_justification_returns_422(client, setup, db_sessio
         headers={"Authorization": f"Bearer {stu_token}"},
     )
     assert resp.status_code == 422
+
+
+async def test_diagnose_incorrect_persists_avg_latency(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc), status=SessionStatus.active)
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Message(session_id=session.id, role=MessageRole.patient,
+                           content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False))
+    db_session.add(Message(session_id=session.id, role=MessageRole.student,
+                           content="Tell me more.", sent_at=datetime.now(timezone.utc),
+                           is_nudge=False, response_latency_sec=600.0))
+    await db_session.commit()
+
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": False, "rubric_score": 30.0, "feedback": "No."})
+        gw.generate_hint = AsyncMock(return_value="Reconsider.")
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="MDD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+    assert resp.status_code == 200
+
+    # The request committed on a separate DB session; refresh to read the persisted value.
+    await db_session.refresh(session)
+    assert session.avg_response_latency_sec == 600.0

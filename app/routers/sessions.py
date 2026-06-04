@@ -161,7 +161,9 @@ async def diagnose(
 
     if not score.is_correct:
         hint = await generate_diagnosis_hint(body.primary_dx, disease.name)
-        # Persist the refreshed avg latency; session stays active, no score row.
+        # Persist only the refreshed avg latency (mutated inside grade_diagnosis);
+        # the Score was built but never db.add-ed, so no score row is written and
+        # the session stays active. Safe because no ORM relationship cascades to Score.
         await db.commit()
         return DiagnosisResult(correct=False, hint=hint)
 
