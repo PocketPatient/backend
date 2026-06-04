@@ -124,6 +124,9 @@ class LLMGateway:
     async def grade_diagnosis(self, disease: Disease, submission, transcript: str) -> dict:
         prompt = self._build_grading_prompt(disease, submission, transcript)
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        # response_schema steers Gemini toward well-formed JSON; json.loads(response.text)
+        # below is the single source of truth for parsing. The manual clamp is needed
+        # because the schema can't express the 0-100 range constraint.
         config = GenerateContentConfig(
             temperature=0.3,
             max_output_tokens=800,

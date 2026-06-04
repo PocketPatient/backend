@@ -297,3 +297,43 @@ async def test_generate_hint_empty_raises_502(mock_genai):
     with pytest.raises(HTTPException) as exc:
         await gw.generate_hint("GAD", "MDD")
     assert exc.value.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_prompt_contains_diagnosis_details(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = (
+        '{"is_correct": true, "rubric_score": 80, "feedback": "x"}'
+    )
+    gw = LLMGateway()
+    disease = _make_disease(name="Major Depressive Disorder")
+    submission = _make_submission(primary_dx="Bipolar I", differentials=["GAD"])
+
+    await gw.grade_diagnosis(disease, submission, "Patient: I feel low")
+
+    contents = mock_client.models.generate_content.call_args.kwargs["contents"]
+    prompt = contents[0]["parts"][0]["text"]
+    assert "Major Depressive Disorder" in prompt   # the actual condition
+    assert "Bipolar I" in prompt                    # student's primary dx
+    assert "GAD" in prompt                          # student's differential
+    assert "Patient: I feel low" in prompt          # transcript
+
+
+@pytest.mark.asyncio
+async def test_generate_hint_prompt_warns_against_revealing(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = "Consider the sleep pattern."
+    gw = LLMGateway()
+
+    await gw.generate_hint("Generalized Anxiety Disorder", "Major Depressive Disorder")
+
+    contents = mock_client.models.generate_content.call_args.kwargs["contents"]
+    prompt = contents[0]["parts"][0]["text"]
+    assert "Generalized Anxiety Disorder" in prompt   # the wrong guess
+    assert "Major Depressive Disorder" in prompt      # actual, used in the "do not name" instruction
+    lowered = prompt.lower()
+    assert "without revealing" in lowered or "do not name" in lowered
