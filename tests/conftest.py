@@ -108,7 +108,7 @@ async def _truncate_all():
             "AND state = 'idle in transaction'"
         )
         await conn.execute(
-            "TRUNCATE TABLE messages, sessions, disease_documents, diseases, units, enrollments, courses, users CASCADE"
+            "TRUNCATE TABLE scores, messages, sessions, disease_documents, diseases, units, enrollments, courses, users CASCADE"
         )
     finally:
         await conn.close()
