@@ -27,6 +27,26 @@ class MessageOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ScoreOut(BaseModel):
+    primary_dx: str
+    differentials: list[str]
+    justification: str | None
+    is_correct: bool | None
+    rubric_score: float | None
+    response_time_score: float | None
+    total_score: float | None
+    feedback_text: str | None
+    graded_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
+class RevealOut(BaseModel):
+    disease_name: str
+    dsm_code: str | None
+    unit_label: str
+
+
 class SessionOut(BaseModel):
     id: uuid.UUID
     disease_id: uuid.UUID
@@ -35,5 +55,20 @@ class SessionOut(BaseModel):
     turn_count: int
     started_at: datetime
     messages: list[MessageOut]
+    score: ScoreOut | None = None
+    reveal: RevealOut | None = None
 
     model_config = {"from_attributes": True}
+
+
+class DiagnosisCreate(BaseModel):
+    primary_dx: str = Field(min_length=1, max_length=255)
+    differentials: list[str] = Field(default_factory=list, max_length=3)
+    justification: str = Field(min_length=50)
+
+
+class DiagnosisResult(BaseModel):
+    correct: bool
+    score: ScoreOut | None = None
+    reveal: RevealOut | None = None
+    hint: str | None = None
