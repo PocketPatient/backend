@@ -11,6 +11,7 @@ from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
 from app.models.message import Message, MessageRole
+from app.models.score import Score
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
 from app.models.user import User, UserRole
@@ -430,3 +431,141 @@ async def test_send_message_not_owner_returns_404(client, setup, db_session, rsa
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert resp.status_code == 404
+
+
+def _diag_body(primary_dx="GAD"):
+    return {"primary_dx": primary_dx,
+            "differentials": ["MDD"],
+            "justification": "Patient reports persistent worry and restlessness. " + "x" * 20}
+
+
+async def _seed_active_session(db_session, stu, course, disease):
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc), status=SessionStatus.active)
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Message(session_id=session.id, role=MessageRole.patient,
+                           content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False))
+    await db_session.commit()
+    await db_session.refresh(session)
+    return session
+
+
+async def test_diagnose_correct_reveals_and_completes(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": True, "rubric_score": 92.0, "feedback": "Excellent."})
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="GAD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] is True
+    assert data["score"]["total_score"] is not None
+    assert data["reveal"]["disease_name"] == "GAD"
+    assert data["reveal"]["unit_label"] == "Unit 1"
+
+    from sqlalchemy import select
+    refreshed = (await db_session.execute(
+        select(Session).where(Session.id == session.id))).scalar_one()
+    await db_session.refresh(refreshed)
+    assert refreshed.status == SessionStatus.diagnosed
+    assert refreshed.completed_at is not None
+    row = (await db_session.execute(
+        select(Score).where(Score.session_id == session.id))).scalar_one_or_none()
+    assert row is not None
+
+
+async def test_diagnose_incorrect_returns_hint_no_score(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": False, "rubric_score": 35.0, "feedback": "Not quite."})
+        gw.generate_hint = AsyncMock(return_value="Look again at the worry patterns.")
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="MDD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["correct"] is False
+    assert data["hint"] == "Look again at the worry patterns."
+    assert data.get("score") is None
+
+    from sqlalchemy import select
+    row = (await db_session.execute(
+        select(Score).where(Score.session_id == session.id))).scalar_one_or_none()
+    assert row is None
+    refreshed = (await db_session.execute(
+        select(Session).where(Session.id == session.id))).scalar_one()
+    await db_session.refresh(refreshed)
+    assert refreshed.status == SessionStatus.active
+
+
+async def test_diagnose_session_not_active_returns_409(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc), status=SessionStatus.diagnosed)
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/diagnose",
+        json=_diag_body(),
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 409
+
+
+async def test_diagnose_not_owner_returns_404(client, setup, db_session, rsa_keys):
+    _, _, stu, _, course, disease = setup
+    private_pem, _ = rsa_keys
+    other = User(google_uid=f"dx-{uuid.uuid4().hex}",
+                 email=f"dx-{uuid.uuid4().hex[:8]}@test.edu",
+                 role=UserRole.student, is_verified=True, display_name="Other",
+                 created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc))
+    db_session.add(other)
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    from jose import jwt
+    token = jwt.encode({"sub": str(other.id)}, private_pem, algorithm="RS256")
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/diagnose",
+        json=_diag_body(),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+async def test_diagnose_professor_forbidden(client, setup, db_session):
+    _, prof_token, stu, _, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/diagnose",
+        json=_diag_body(),
+        headers={"Authorization": f"Bearer {prof_token}"},
+    )
+    assert resp.status_code == 403
+
+
+async def test_diagnose_short_justification_returns_422(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    resp = await client.post(
+        f"/api/v1/sessions/{session.id}/diagnose",
+        json={"primary_dx": "GAD", "differentials": [], "justification": "idk"},
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 422

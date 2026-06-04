@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -9,11 +10,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.deps import get_current_user, require_role
 from app.models.course import Course
+from app.models.disease import Disease
 from app.models.enrollment import Enrollment
 from app.models.message import Message, MessageRole
+from app.models.score import Score
 from app.models.session import Session, SessionStatus
+from app.models.unit import Unit
 from app.models.user import User, UserRole
-from app.schemas.session import MessageCreate, MessageOut, SessionCreate, SessionOut
+from app.schemas.session import (
+    DiagnosisCreate,
+    DiagnosisResult,
+    MessageCreate,
+    MessageOut,
+    RevealOut,
+    ScoreOut,
+    SessionCreate,
+    SessionOut,
+)
+from app.services.grading_service import generate_diagnosis_hint, grade_diagnosis
 from app.services.session_service import (
     create_new_session,
     get_active_session,
@@ -117,6 +131,58 @@ async def send_message(
         content=patient_reply.content,
         sent_at=patient_reply.sent_at,
         response_latency_sec=patient_reply.response_latency_sec,
+    )
+
+
+@router.post("/{session_id}/diagnose", response_model=DiagnosisResult)
+async def diagnose(
+    session_id: uuid.UUID,
+    body: DiagnosisCreate,
+    current_user: User = Depends(require_role("student")),
+    db: AsyncSession = Depends(get_db),
+) -> DiagnosisResult:
+    session = (
+        await db.execute(
+            select(Session).where(
+                Session.id == session_id,
+                Session.user_id == current_user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if session.status != SessionStatus.active:
+        raise HTTPException(status_code=409, detail="Session is not active")
+
+    score = await grade_diagnosis(session, body, db)
+    disease = (
+        await db.execute(select(Disease).where(Disease.id == session.disease_id))
+    ).scalar_one()
+
+    if not score.is_correct:
+        hint = await generate_diagnosis_hint(body.primary_dx, disease.name)
+        # Persist the refreshed avg latency; session stays active, no score row.
+        await db.commit()
+        return DiagnosisResult(correct=False, hint=hint)
+
+    db.add(score)
+    session.status = SessionStatus.diagnosed
+    session.completed_at = datetime.now(timezone.utc)
+    db.add(session)
+    await db.commit()
+    await db.refresh(score)
+
+    unit = (
+        await db.execute(select(Unit).where(Unit.id == disease.unit_id))
+    ).scalar_one()
+    return DiagnosisResult(
+        correct=True,
+        score=ScoreOut.model_validate(score),
+        reveal=RevealOut(
+            disease_name=disease.name,
+            dsm_code=disease.dsm_code,
+            unit_label=unit.label,
+        ),
     )
 
 
