@@ -189,9 +189,9 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | GET | `/api/v1/sessions/active?course_id={id}` | Active session for this course (with messages) | Bearer JWT (student) | ✅ Week 7 |
 | GET | `/api/v1/sessions/{session_id}` | Session detail with all messages | Bearer JWT (owner or course professor) | ✅ Week 7 |
 | POST | `/api/v1/sessions/{session_id}/messages` | Send a student reply; returns the AI patient's response | Bearer JWT (student owner, active session) | ✅ Week 7 |
-| POST | `/api/v1/sessions/{id}/diagnose` | Submit a diagnosis; grade or hint | Bearer JWT (student owner) | ✅ Week 8 |
+| POST | `/api/v1/sessions/{session_id}/diagnose` | Submit a diagnosis; grade or hint | Bearer JWT (student owner) | ✅ Week 8 |
 
-`SessionOut` — id, disease_id, course_id, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`).
+`SessionOut` — id, disease_id, course_id, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`), and (diagnosed only) `score` (ScoreOut) + `reveal` (disease_name, dsm_code, unit_label).
 `MessageOut` — id, role (`student`/`patient`/`system`), content, sent_at, response_latency_sec.
 
 ### POST /api/v1/sessions
