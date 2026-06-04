@@ -189,6 +189,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | GET | `/api/v1/sessions/active?course_id={id}` | Active session for this course (with messages) | Bearer JWT (student) | ✅ Week 7 |
 | GET | `/api/v1/sessions/{session_id}` | Session detail with all messages | Bearer JWT (owner or course professor) | ✅ Week 7 |
 | POST | `/api/v1/sessions/{session_id}/messages` | Send a student reply; returns the AI patient's response | Bearer JWT (student owner, active session) | ✅ Week 7 |
+| POST | `/api/v1/sessions/{id}/diagnose` | Submit a diagnosis; grade or hint | Bearer JWT (student owner) | ✅ Week 8 |
 
 `SessionOut` — id, disease_id, course_id, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`).
 `MessageOut` — id, role (`student`/`patient`/`system`), content, sent_at, response_latency_sec.
@@ -208,7 +209,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 
 ### GET /api/v1/sessions/{session_id}
 **Auth:** session owner (student) **or** the professor who owns the session's course.
-**Response (200):** `SessionOut` with all messages.
+**Response (200):** `SessionOut` with all messages. For `diagnosed` sessions, also includes `score` (ScoreOut) and `reveal` (disease_name, dsm_code, unit_label); both fields are `null` while the session is `active`.
 **Errors:** 401 unauthenticated, 404 not found or caller not authorized (existence not leaked)
 
 ### POST /api/v1/sessions/{session_id}/messages
@@ -217,6 +218,15 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 **Behavior:** Records the student message with `response_latency_sec` (seconds since the last patient message), then calls the LLM for the patient's reply and increments `turn_count`. The student message is committed before the LLM call, so a gateway failure does not discard it.
 **Response (201):** `MessageOut` — the patient's reply.
 **Errors:** 401 unauthenticated, 403 not a student, 404 not found or not owner, 409 session is not active, 422 empty content, 502 LLM returned an empty response
+
+### POST /api/v1/sessions/{session_id}/diagnose
+**Role required:** student (session owner)  
+**Request:** `{"primary_dx": "Major Depressive Disorder", "differentials": ["Bipolar II", "Adjustment Disorder"], "justification": "Patient presents with... (min 50 chars)"}`  
+**Response (correct):** `{"correct": true, "score": ScoreOut, "reveal": {"disease_name": "...", "dsm_code": "...", "unit_label": "..."}}` — session becomes `diagnosed`, `completed_at` set, a Score row is persisted.  
+**Response (incorrect):** `{"correct": false, "hint": "Consider re-examining the patient's speech patterns"}` — session stays `active`, nothing persisted to scores.  
+**Errors:** 403 not a student, 404 session not found / not owner, 409 session not active, 422 invalid body (empty primary_dx, >3 differentials, justification <50 chars), 502 LLM failure  
+`ScoreOut` = primary_dx, differentials, justification, is_correct, rubric_score, response_time_score, total_score, feedback_text, graded_at.  
+**Note:** `GET /api/v1/sessions/{id}` now includes `score` (ScoreOut) and `reveal` (disease_name, dsm_code, unit_label) for `diagnosed` sessions, and `null` for both while `active`.
 
 ---
 
