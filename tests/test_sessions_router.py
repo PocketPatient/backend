@@ -664,3 +664,51 @@ async def test_get_session_diagnosed_professor_sees_reveal(client, setup, db_ses
     data = resp.json()
     assert data["reveal"]["disease_name"] == "GAD"
     assert data["score"]["total_score"] == 93.0
+
+
+async def test_full_diagnosis_lifecycle_wrong_then_correct(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+
+    # 1. WRONG diagnosis → hint, session stays active, no score row.
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": False, "rubric_score": 25.0, "feedback": "Not yet."})
+        gw.generate_hint = AsyncMock(return_value="Revisit the worry timeline.")
+        r1 = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="MDD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+    assert r1.status_code == 200
+    assert r1.json()["correct"] is False
+    assert r1.json()["hint"] == "Revisit the worry timeline."
+
+    from sqlalchemy import select
+    assert (await db_session.execute(
+        select(Score).where(Score.session_id == session.id))).scalar_one_or_none() is None
+
+    # 2. Resubmit CORRECT diagnosis → score + reveal, session diagnosed.
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": True, "rubric_score": 95.0, "feedback": "Spot on."})
+        r2 = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="GAD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+    assert r2.status_code == 200
+    body = r2.json()
+    assert body["correct"] is True
+    assert body["reveal"]["disease_name"] == "GAD"
+    assert body["score"]["feedback_text"] == "Spot on."
+
+    # exactly one score row now exists; session is diagnosed.
+    rows = (await db_session.execute(
+        select(Score).where(Score.session_id == session.id))).scalars().all()
+    assert len(rows) == 1
+    refreshed = (await db_session.execute(
+        select(Session).where(Session.id == session.id))).scalar_one()
+    await db_session.refresh(refreshed)
+    assert refreshed.status == SessionStatus.diagnosed
+    assert refreshed.completed_at is not None
