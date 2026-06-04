@@ -46,6 +46,8 @@ class RevealOut(BaseModel):
     dsm_code: str | None
     unit_label: str
 
+    model_config = {"from_attributes": True}
+
 
 class SessionOut(BaseModel):
     id: uuid.UUID
@@ -64,7 +66,7 @@ class SessionOut(BaseModel):
 class DiagnosisCreate(BaseModel):
     primary_dx: str = Field(min_length=1, max_length=255)
     differentials: list[str] = Field(default_factory=list, max_length=3)
-    justification: str = Field(min_length=50)
+    justification: str = Field(min_length=50, max_length=2000)
 
 
 class DiagnosisResult(BaseModel):
@@ -72,3 +74,5 @@ class DiagnosisResult(BaseModel):
     score: ScoreOut | None = None
     reveal: RevealOut | None = None
     hint: str | None = None
+
+    model_config = {"from_attributes": True}
