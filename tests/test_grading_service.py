@@ -37,6 +37,7 @@ def test_time_score_midpoint_between_50_and_100():
     # 30 min < x < 24 h decays linearly from 100 to 50
     score = compute_response_time_score(12 * 60 * 60)
     assert 50.0 < score < 100.0
+    assert score == pytest.approx(75.53, abs=0.1)
 
 
 @pytest_asyncio.fixture
@@ -108,3 +109,18 @@ async def test_grade_diagnosis_sets_session_avg_latency(graded_setup, db_session
             "is_correct": True, "rubric_score": 80.0, "feedback": "ok"})
         await grade_diagnosis(graded_setup, _submission(), db_session)
     assert graded_setup.avg_response_latency_sec == 600.0
+
+
+async def test_grade_diagnosis_averages_multiple_student_latencies(graded_setup, db_session):
+    db_session.add(Message(session_id=graded_setup.id, role=MessageRole.student,
+                           content="And then?", sent_at=datetime.now(timezone.utc),
+                           is_nudge=False, response_latency_sec=1200.0))
+    await db_session.commit()
+
+    with patch("app.services.grading_service.gateway") as gw:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": True, "rubric_score": 80.0, "feedback": "ok"})
+        await grade_diagnosis(graded_setup, _submission(), db_session)
+
+    # mean of 600.0 and 1200.0
+    assert graded_setup.avg_response_latency_sec == 900.0

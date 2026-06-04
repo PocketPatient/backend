@@ -9,6 +9,7 @@ from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.score import Score
 from app.models.session import Session
+from app.schemas.session import DiagnosisCreate
 from app.services.llm_gateway import gateway
 from app.services.session_service import get_session_messages
 
@@ -56,8 +57,9 @@ def _build_transcript(messages: list[Message]) -> str:
     return "\n".join(lines)
 
 
-async def grade_diagnosis(session: Session, submission, db: AsyncSession) -> Score:
-    """Build (but do not commit) a Score for the submission. Caller owns the txn."""
+async def grade_diagnosis(session: Session, submission: DiagnosisCreate, db: AsyncSession) -> Score:
+    """Build (but do not commit) a Score for the submission, and refresh
+    session.avg_response_latency_sec as a side effect. Caller owns the txn."""
     disease = (
         await db.execute(select(Disease).where(Disease.id == session.disease_id))
     ).scalar_one()
