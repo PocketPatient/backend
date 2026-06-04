@@ -598,3 +598,45 @@ async def test_diagnose_incorrect_persists_avg_latency(client, setup, db_session
     # The request committed on a separate DB session; refresh to read the persisted value.
     await db_session.refresh(session)
     assert session.avg_response_latency_sec == 600.0
+
+
+async def test_get_session_diagnosed_includes_reveal(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc),
+                      status=SessionStatus.diagnosed,
+                      completed_at=datetime.now(timezone.utc))
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Score(session_id=session.id, primary_dx="GAD", differentials=["MDD"],
+                         justification="x" * 60, is_correct=True, rubric_score=90.0,
+                         response_time_score=100.0, total_score=93.0,
+                         feedback_text="Great.", graded_at=datetime.now(timezone.utc)))
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["score"]["total_score"] == 93.0
+    assert data["reveal"]["disease_name"] == "GAD"
+    assert data["reveal"]["unit_label"] == "Unit 1"
+
+
+async def test_get_session_active_hides_reveal(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = Session(disease_id=disease.id, user_id=stu.id, course_id=course.id,
+                      started_at=datetime.now(timezone.utc), status=SessionStatus.active)
+    db_session.add(session)
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["score"] is None
+    assert data["reveal"] is None

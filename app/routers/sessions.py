@@ -38,7 +38,12 @@ from app.services.session_service import (
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 
-def _session_out(session: Session, messages: list[Message]) -> SessionOut:
+def _session_out(
+    session: Session,
+    messages: list[Message],
+    score: ScoreOut | None = None,
+    reveal: RevealOut | None = None,
+) -> SessionOut:
     return SessionOut(
         id=session.id,
         disease_id=session.disease_id,
@@ -56,7 +61,32 @@ def _session_out(session: Session, messages: list[Message]) -> SessionOut:
             )
             for m in messages
         ],
+        score=score,
+        reveal=reveal,
     )
+
+
+async def _load_reveal(
+    session: Session, db: AsyncSession
+) -> tuple[ScoreOut | None, RevealOut | None]:
+    if session.status != SessionStatus.diagnosed:
+        return None, None
+    score_row = (
+        await db.execute(select(Score).where(Score.session_id == session.id))
+    ).scalar_one_or_none()
+    disease = (
+        await db.execute(select(Disease).where(Disease.id == session.disease_id))
+    ).scalar_one()
+    unit = (
+        await db.execute(select(Unit).where(Unit.id == disease.unit_id))
+    ).scalar_one()
+    score_out = ScoreOut.model_validate(score_row) if score_row is not None else None
+    reveal = RevealOut(
+        disease_name=disease.name,
+        dsm_code=disease.dsm_code,
+        unit_label=unit.label,
+    )
+    return score_out, reveal
 
 
 @router.get("/active", response_model=SessionOut)
@@ -101,7 +131,8 @@ async def get_session(
             raise HTTPException(status_code=404, detail="Session not found")
 
     messages = await get_session_messages(session.id, db)
-    return _session_out(session, messages)
+    score_out, reveal = await _load_reveal(session, db)
+    return _session_out(session, messages, score_out, reveal)
 
 
 @router.post("/{session_id}/messages", response_model=MessageOut, status_code=201)
