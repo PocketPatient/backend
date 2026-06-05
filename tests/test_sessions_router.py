@@ -712,3 +712,46 @@ async def test_full_diagnosis_lifecycle_wrong_then_correct(client, setup, db_ses
     await db_session.refresh(refreshed)
     assert refreshed.status == SessionStatus.diagnosed
     assert refreshed.completed_at is not None
+
+
+async def test_send_message_dispatches_push_notification(client, setup, db_session):
+    import app.tasks.push_notifications as _push_mod
+    from unittest.mock import patch, MagicMock
+
+    _, _, stu, stu_token, course, disease = setup
+
+    # Create an active session with an opening message
+    session = Session(
+        disease_id=disease.id,
+        user_id=stu.id,
+        course_id=course.id,
+        started_at=datetime.now(timezone.utc),
+        status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Message(
+        session_id=session.id,
+        role=MessageRole.patient,
+        content="Hi there.",
+        sent_at=datetime.now(timezone.utc),
+        is_nudge=False,
+    ))
+    await db_session.commit()
+
+    mock_push = MagicMock()
+    with patch.object(_push_mod, "send_push", mock_push), \
+         patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_patient_message = AsyncMock(return_value="I feel tired.")
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/messages",
+            json={"content": "How long have you felt this way?"},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 201
+    mock_push.delay.assert_called_once()
+    call_args = mock_push.delay.call_args.args
+    assert call_args[0] == str(stu.id)
+    assert call_args[3]["type"] == "new_message"
+    assert call_args[3]["session_id"] == str(session.id)

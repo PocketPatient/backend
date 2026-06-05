@@ -156,4 +156,16 @@ async def send_student_message_and_get_reply(
 
     await db.commit()
     await db.refresh(patient_msg)
+
+    try:
+        import app.tasks.push_notifications as _push_mod
+        _push_mod.send_push.delay(
+            str(session.user_id),
+            "PocketPatient",
+            "Your patient replied",
+            {"type": "new_message", "session_id": str(session.id)},
+        )
+    except Exception:
+        pass
+
     return patient_msg
