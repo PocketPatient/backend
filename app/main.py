@@ -2,8 +2,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 import logging
 
-import firebase_admin
-import firebase_admin.credentials
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -20,12 +18,8 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if not firebase_admin._apps:
-        if settings.firebase_credentials_path:
-            cred = firebase_admin.credentials.Certificate(settings.firebase_credentials_path)
-            firebase_admin.initialize_app(cred)
-        elif settings.firebase_project_id:
-            firebase_admin.initialize_app(options={"projectId": settings.firebase_project_id})
+    from app.services.firebase import init_firebase
+    init_firebase()
     app.state.redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     yield
     await app.state.redis.aclose()
