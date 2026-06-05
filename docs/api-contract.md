@@ -29,6 +29,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 |--------|------|-------------|------|--------|
 | GET | `/api/v1/users/me` | Get current user profile | Bearer JWT | ✅ Week 2 |
 | PUT | `/api/v1/users/me/role` | Set role (once only) | Bearer JWT | ✅ Week 2 |
+| PUT | `/api/v1/users/me/fcm-token` | Store or replace FCM push token | Bearer JWT | ✅ Week 9 |
 
 ### GET /api/v1/users/me
 **Response:** `UserOut` — id, google_uid, email, role, is_verified, display_name, created_at  
@@ -39,6 +40,13 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 **Response:** updated `UserOut`  
 **Errors:** 401 unauthenticated, 409 role already set, 422 invalid role value  
 **Side effects:** student → `is_verified=true`; professor → `is_verified=false` (pending approval)
+
+### PUT /api/v1/users/me/fcm-token
+**Auth:** any authenticated user (student or professor)  
+**Request:** `{"fcm_token": "<string, 1–512 chars>"}`  
+**Response (200):** `UserOut` (same shape as `GET /users/me`)  
+**Errors:** 401 unauthenticated, 422 `fcm_token` is empty or missing  
+**Notes:** The `fcm_token` field is write-only — it is NOT included in `UserOut`. This endpoint is idempotent; calling it again replaces the stored token.
 
 ---
 
