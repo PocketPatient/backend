@@ -1,15 +1,11 @@
 from __future__ import annotations
 
 import pytest
-import pytest_asyncio
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
 
 
 async def test_put_fcm_token_sets_token(client, student, db_session):
-    from sqlalchemy import select
-    from app.models.user import User
-
     stu, token = student
     resp = await client.put(
         "/api/v1/users/me/fcm-token",
