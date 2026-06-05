@@ -26,7 +26,7 @@ from app.tasks.push_notifications import send_push
 logger = logging.getLogger(__name__)
 
 
-async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime]]:
+async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime, str]]:
     """Return (user_id, course_id, window_end_utc) for each eligible student."""
     async with AsyncSessionLocal() as db:
         courses_q = (
@@ -38,7 +38,7 @@ async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime]]
         courses = list((await db.execute(courses_q)).scalars().all())
 
         now_utc = datetime.now(timezone.utc)
-        eligible: list[tuple[uuid.UUID, uuid.UUID, datetime]] = []
+        eligible: list[tuple[uuid.UUID, uuid.UUID, datetime, str]] = []
 
         for course in courses:
             tz = ZoneInfo(course.msg_timezone)
@@ -76,7 +76,7 @@ async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime]]
             students = list((await db.execute(students_q)).scalars().all())
 
             for student in students:
-                eligible.append((student.id, course.id, window_end_utc))
+                eligible.append((student.id, course.id, window_end_utc, course.msg_timezone))
 
         return eligible
 
@@ -98,9 +98,9 @@ def check_and_initiate_cases() -> None:
 
     r = sync_redis.from_url(settings.redis_url, decode_responses=True)
     try:
-        for user_id, course_id, window_end_utc in pairs:
-            today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            dedup_key = f"initiate:{course_id}:{user_id}:{today}"
+        for user_id, course_id, window_end_utc, msg_timezone in pairs:
+            local_today = datetime.now(timezone.utc).astimezone(ZoneInfo(msg_timezone)).strftime("%Y-%m-%d")
+            dedup_key = f"initiate:{course_id}:{user_id}:{local_today}"
             ttl = max(1, int((window_end_utc - datetime.now(timezone.utc)).total_seconds()))
             if r.set(dedup_key, "1", nx=True, ex=ttl):
                 eta = _random_eta(window_end_utc)
