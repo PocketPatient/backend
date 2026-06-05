@@ -12,9 +12,13 @@ from app.services import push_service
 
 
 async def _get_fcm_token(user_id: str) -> str | None:
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return None
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            select(User.fcm_token).where(User.id == uuid.UUID(user_id))
+            select(User.fcm_token).where(User.id == uid)
         )
         return result.scalar_one_or_none()
 

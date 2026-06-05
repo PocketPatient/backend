@@ -23,6 +23,7 @@ def test_send_push_notification_builds_correct_message():
         call_kwargs = mock_messaging.Message.call_args.kwargs
         assert call_kwargs["token"] == "device-token-123"
         assert call_kwargs["data"] == {"type": "new_case", "session_id": "abc"}
+        assert call_kwargs["notification"] == mock_messaging.Notification.return_value
         mock_messaging.send.assert_called_once()
 
 
