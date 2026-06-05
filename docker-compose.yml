@@ -22,6 +22,7 @@ services:
   celery-worker:
     build: .
     command: celery -A app.celery_app worker --loglevel=info
+    restart: unless-stopped
     env_file: .env
     depends_on:
       - db
@@ -30,6 +31,7 @@ services:
   celery-beat:
     build: .
     command: celery -A app.celery_app beat --loglevel=info
+    restart: unless-stopped
     env_file: .env
     depends_on:
       - db
