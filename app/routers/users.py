@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -33,6 +33,23 @@ async def set_role(
         raise HTTPException(status_code=409, detail="Role already set")
     current_user.role = UserRole(body.role)
     current_user.is_verified = body.role == "student"
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return current_user
+
+
+class FcmTokenRequest(BaseModel):
+    fcm_token: str = Field(min_length=1, max_length=512)
+
+
+@router.put("/me/fcm-token", response_model=UserOut)
+async def register_fcm_token(
+    body: FcmTokenRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    current_user.fcm_token = body.fcm_token
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)

@@ -29,3 +29,4 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    fcm_token: Mapped[str | None] = mapped_column(String(512), nullable=True)
