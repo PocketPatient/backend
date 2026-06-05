@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -716,7 +716,6 @@ async def test_full_diagnosis_lifecycle_wrong_then_correct(client, setup, db_ses
 
 async def test_send_message_dispatches_push_notification(client, setup, db_session):
     import app.tasks.push_notifications as _push_mod
-    from unittest.mock import patch, MagicMock
 
     _, _, stu, stu_token, course, disease = setup
 
@@ -753,5 +752,7 @@ async def test_send_message_dispatches_push_notification(client, setup, db_sessi
     mock_push.delay.assert_called_once()
     call_args = mock_push.delay.call_args.args
     assert call_args[0] == str(stu.id)
+    assert call_args[1] == "PocketPatient"
+    assert call_args[2] == "Your patient replied"
     assert call_args[3]["type"] == "new_message"
     assert call_args[3]["session_id"] == str(session.id)

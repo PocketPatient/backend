@@ -13,6 +13,7 @@ from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
 from app.services.llm_gateway import gateway, patient_identity
+import app.tasks.push_notifications as _push_mod
 
 
 async def _get_disease_pool(course_id: uuid.UUID, db: AsyncSession) -> list[Disease]:
@@ -158,7 +159,6 @@ async def send_student_message_and_get_reply(
     await db.refresh(patient_msg)
 
     try:
-        import app.tasks.push_notifications as _push_mod
         _push_mod.send_push.delay(
             str(session.user_id),
             "PocketPatient",
