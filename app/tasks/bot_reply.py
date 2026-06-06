@@ -1,0 +1,87 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import uuid
+from datetime import datetime, timezone
+
+from sqlalchemy import select, update
+
+from app.celery_app import celery
+from app.database import AsyncSessionLocal
+from app.models.disease import Disease
+from app.models.message import Message, MessageRole
+from app.models.session import Session, SessionStatus
+from app.services.llm_gateway import gateway, patient_identity
+from app.services.session_service import get_session_messages
+from app.tasks.push_notifications import send_push
+
+logger = logging.getLogger(__name__)
+
+
+async def _generate_and_send(session_id: str, my_task_id: str) -> None:
+    async with AsyncSessionLocal() as db:
+        session = (
+            await db.execute(select(Session).where(Session.id == uuid.UUID(session_id)))
+        ).scalar_one_or_none()
+
+        if (
+            session is None
+            or session.status != SessionStatus.active
+            or session.pending_reply_task_id != my_task_id
+        ):
+            return
+
+        disease = (
+            await db.execute(select(Disease).where(Disease.id == session.disease_id))
+        ).scalar_one()
+        messages = await get_session_messages(session.id, db)
+        history = [
+            {
+                "role": "user" if m.role == MessageRole.student else "model",
+                "parts": [{"text": m.content}],
+            }
+            for m in messages
+        ]
+
+        patient_name, patient_age = patient_identity(session.id.int)
+        reply_text = await gateway.generate_patient_message(disease, patient_name, patient_age, history)
+
+        db.add(Message(
+            session_id=session.id,
+            role=MessageRole.patient,
+            content=reply_text,
+            sent_at=datetime.now(timezone.utc),
+            is_nudge=False,
+        ))
+        session.turn_count = (session.turn_count or 0) + 1
+        db.add(session)
+
+        result = await db.execute(
+            update(Session)
+            .where(Session.id == session.id, Session.pending_reply_task_id == my_task_id)
+            .values(pending_reply_task_id=None)
+        )
+        if result.rowcount == 0:
+            await db.rollback()
+            return
+
+        await db.commit()
+
+    try:
+        send_push.delay(
+            str(session.user_id),
+            "PocketPatient",
+            "Your patient replied",
+            {"type": "new_message", "session_id": str(session.id)},
+        )
+    except Exception:
+        logger.exception("generate_and_send_reply: send_push.delay failed for session=%s", session_id)
+
+
+@celery.task(bind=True, max_retries=3, default_retry_delay=60)
+def generate_and_send_reply(self, session_id: str) -> None:
+    try:
+        asyncio.run(_generate_and_send(session_id, self.request.id))
+    except Exception as exc:
+        raise self.retry(exc=exc)
