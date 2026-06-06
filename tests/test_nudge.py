@@ -215,6 +215,32 @@ async def test_saves_nudge_message_and_dispatches_matching_push(nudge_setup, db_
     assert push_args[3]["session_id"] == str(session.id)
 
 
+async def test_one_session_failing_does_not_abort_the_rest(nudge_setup, db_session):
+    """A transient LLM failure on one eligible session must not prevent nudges
+    for the others — each session is committed and pushed independently."""
+    prof, stu = nudge_setup
+    course1, disease1 = await _make_course_with_disease(db_session, prof, stu, frequency="high")
+    course2, disease2 = await _make_course_with_disease(db_session, prof, stu, frequency="high")
+    s1 = await _make_session(db_session, stu, course1, disease1, last_message_hours_ago=25)
+    s2 = await _make_session(db_session, stu, course2, disease2, last_message_hours_ago=25)
+    # Capture ids up front: the production rollback on the failing session expires
+    # these ORM objects (the worker reuses this test's db_session), and re-reading
+    # an attribute afterward would trigger a sync lazy-load on an async session.
+    s1_id, s2_id = s1.id, s2.id
+
+    with patch("app.tasks.nudge.AsyncSessionLocal", return_value=_ctx(db_session)), \
+         patch("app.tasks.nudge.gateway") as mock_gw, \
+         patch("app.tasks.nudge.send_push") as mock_push:
+        # First session processed raises; the second must still succeed.
+        mock_gw.generate_nudge_message = AsyncMock(side_effect=[Exception("LLM down"), "recovered"])
+        from app.tasks.nudge import _run_nudge_check
+        await _run_nudge_check()  # must not raise
+
+    total_nudges = len(await _nudge_messages(db_session, s1_id)) + len(await _nudge_messages(db_session, s2_id))
+    assert total_nudges == 1
+    mock_push.delay.assert_called_once()
+
+
 def test_check_and_send_nudges_invokes_run_check():
     mock_run = MagicMock(return_value="coro-sentinel")
     with patch("app.tasks.nudge.asyncio") as mock_asyncio, \

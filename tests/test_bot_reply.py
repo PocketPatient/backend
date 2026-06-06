@@ -190,7 +190,10 @@ def test_generate_and_send_reply_invokes_helper_with_session_and_task_id():
 
 
 def test_generate_and_send_reply_retries_on_exception():
-    with patch("app.tasks.bot_reply.asyncio") as mock_asyncio:
+    # Stub the helper too, else the real _generate_and_send(...) coroutine is built
+    # to pass into the mocked asyncio.run and, never awaited, leaks a RuntimeWarning.
+    with patch("app.tasks.bot_reply.asyncio") as mock_asyncio, \
+         patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")):
         mock_asyncio.run.side_effect = Exception("LLM unavailable")
 
         from app.tasks.bot_reply import generate_and_send_reply

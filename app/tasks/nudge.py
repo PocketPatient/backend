@@ -106,7 +106,10 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
         sent_at=now,
         is_nudge=True,
     ))
+    await db.commit()
 
+    # Push only after the nudge is durably committed — a push for a Message that
+    # later rolled back would notify the student of a reply that never persisted.
     try:
         send_push.delay(
             str(session.user_id),
@@ -122,8 +125,13 @@ async def _run_nudge_check() -> None:
     async with AsyncSessionLocal() as db:
         session_ids = await _fetch_eligible_session_ids(db)
         for session_id in session_ids:
-            await _maybe_send_nudge(session_id, db)
-        await db.commit()
+            # Isolate per-session failures (e.g. a transient LLM error) so one bad
+            # session can't abort nudges for every other eligible session this run.
+            try:
+                await _maybe_send_nudge(session_id, db)
+            except Exception:
+                await db.rollback()
+                logger.exception("check_and_send_nudges: nudge failed for session=%s", session_id)
 
 
 @celery.task
