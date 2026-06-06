@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, func, text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -50,6 +50,7 @@ class Session(Base):
     )
     turn_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     avg_response_latency_sec: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pending_reply_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

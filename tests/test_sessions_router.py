@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
@@ -243,7 +243,7 @@ async def test_get_session_by_id_unauthorized_user_returns_404(client, setup, db
     assert resp.status_code == 404
 
 
-async def test_send_message_returns_patient_reply(client, setup, db_session):
+async def test_send_message_returns_202_with_echoed_student_message(client, setup, db_session):
     _, _, stu, stu_token, course, disease = setup
 
     session = Session(
@@ -260,21 +260,25 @@ async def test_send_message_returns_patient_reply(client, setup, db_session):
     db_session.add(opening)
     await db_session.commit()
 
-    with patch("app.services.session_service.gateway") as mock_gw:
-        mock_gw.generate_patient_message = AsyncMock(return_value="My mood has been really low.")
+    with patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task:
         resp = await client.post(
             f"/api/v1/sessions/{session.id}/messages",
             json={"content": "Tell me how you've been feeling."},
             headers={"Authorization": f"Bearer {stu_token}"},
         )
 
-    assert resp.status_code == 201
+    assert resp.status_code == 202
     data = resp.json()
-    assert data["role"] == "patient"
-    assert data["content"] == "My mood has been really low."
+    assert data["role"] == "student"
+    assert data["content"] == "Tell me how you've been feeling."
+    assert data["id"] is not None
+    assert data["sent_at"] is not None
+    mock_task.apply_async.assert_called_once()
+    assert "eta" in mock_task.apply_async.call_args.kwargs
 
 
-async def test_send_message_increments_turn_count(client, setup, db_session):
+async def test_send_message_instant_query_param_dispatches_without_eta(client, setup, db_session):
     _, _, stu, stu_token, course, disease = setup
 
     session = Session(
@@ -291,19 +295,17 @@ async def test_send_message_increments_turn_count(client, setup, db_session):
     db_session.add(opening)
     await db_session.commit()
 
-    with patch("app.services.session_service.gateway") as mock_gw:
-        mock_gw.generate_patient_message = AsyncMock(return_value="Feeling low.")
-        await client.post(
-            f"/api/v1/sessions/{session.id}/messages",
+    with patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task:
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/messages?instant=true",
             json={"content": "How are you?"},
             headers={"Authorization": f"Bearer {stu_token}"},
         )
 
-    resp = await client.get(
-        f"/api/v1/sessions/{session.id}",
-        headers={"Authorization": f"Bearer {stu_token}"},
-    )
-    assert resp.json()["turn_count"] == 1
+    assert resp.status_code == 202
+    mock_task.apply_async.assert_called_once()
+    assert "eta" not in mock_task.apply_async.call_args.kwargs
 
 
 async def test_send_message_empty_content_returns_422(client, setup, db_session):
@@ -324,9 +326,7 @@ async def test_send_message_empty_content_returns_422(client, setup, db_session)
     assert resp.status_code == 422
 
 
-async def test_send_message_persists_student_msg_when_llm_fails(client, setup, db_session):
-    from fastapi import HTTPException
-
+async def test_send_message_persists_student_message(client, setup, db_session):
     _, _, stu, stu_token, course, disease = setup
 
     session = Session(
@@ -342,18 +342,15 @@ async def test_send_message_persists_student_msg_when_llm_fails(client, setup, d
     db_session.add(opening)
     await db_session.commit()
 
-    with patch("app.services.session_service.gateway") as mock_gw:
-        mock_gw.generate_patient_message = AsyncMock(
-            side_effect=HTTPException(status_code=502, detail="LLM down")
-        )
+    with patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply"):
         resp = await client.post(
             f"/api/v1/sessions/{session.id}/messages",
             json={"content": "I have been very anxious lately."},
             headers={"Authorization": f"Bearer {stu_token}"},
         )
-    assert resp.status_code == 502
+    assert resp.status_code == 202
 
-    # The student's message must survive the failed LLM call.
     resp2 = await client.get(
         f"/api/v1/sessions/{session.id}",
         headers={"Authorization": f"Bearer {stu_token}"},
@@ -361,7 +358,7 @@ async def test_send_message_persists_student_msg_when_llm_fails(client, setup, d
     data = resp2.json()
     contents = [m["content"] for m in data["messages"]]
     assert "I have been very anxious lately." in contents
-    # No patient reply was added and the turn was not counted.
+    # The reply is generated asynchronously — no patient message or turn yet.
     assert [m["role"] for m in data["messages"]].count("patient") == 1
     assert data["turn_count"] == 0
 
@@ -713,46 +710,3 @@ async def test_full_diagnosis_lifecycle_wrong_then_correct(client, setup, db_ses
     assert refreshed.status == SessionStatus.diagnosed
     assert refreshed.completed_at is not None
 
-
-async def test_send_message_dispatches_push_notification(client, setup, db_session):
-    import app.tasks.push_notifications as _push_mod
-
-    _, _, stu, stu_token, course, disease = setup
-
-    # Create an active session with an opening message
-    session = Session(
-        disease_id=disease.id,
-        user_id=stu.id,
-        course_id=course.id,
-        started_at=datetime.now(timezone.utc),
-        status=SessionStatus.active,
-    )
-    db_session.add(session)
-    await db_session.flush()
-    db_session.add(Message(
-        session_id=session.id,
-        role=MessageRole.patient,
-        content="Hi there.",
-        sent_at=datetime.now(timezone.utc),
-        is_nudge=False,
-    ))
-    await db_session.commit()
-
-    mock_push = MagicMock()
-    with patch.object(_push_mod, "send_push", mock_push), \
-         patch("app.services.session_service.gateway") as mock_gw:
-        mock_gw.generate_patient_message = AsyncMock(return_value="I feel tired.")
-        resp = await client.post(
-            f"/api/v1/sessions/{session.id}/messages",
-            json={"content": "How long have you felt this way?"},
-            headers={"Authorization": f"Bearer {stu_token}"},
-        )
-
-    assert resp.status_code == 201
-    mock_push.delay.assert_called_once()
-    call_args = mock_push.delay.call_args.args
-    assert call_args[0] == str(stu.id)
-    assert call_args[1] == "PocketPatient"
-    assert call_args[2] == "Your patient replied"
-    assert call_args[3]["type"] == "new_message"
-    assert call_args[3]["session_id"] == str(session.id)

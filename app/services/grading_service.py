@@ -11,7 +11,7 @@ from app.models.score import Score
 from app.models.session import Session
 from app.schemas.session import DiagnosisCreate
 from app.services.llm_gateway import gateway
-from app.services.session_service import get_session_messages
+from app.services.session_service import avg_student_latency, get_session_messages
 
 # Scoring weights — promote to per-course config later.
 RUBRIC_WEIGHT = 0.7
@@ -38,17 +38,6 @@ def compute_response_time_score(avg_latency_sec: float | None) -> float:
     return TIME_SCORE_FULL - frac * (TIME_SCORE_FULL - TIME_SCORE_FLOOR)
 
 
-def _avg_student_latency(messages: list[Message]) -> float | None:
-    latencies = [
-        m.response_latency_sec
-        for m in messages
-        if m.role == MessageRole.student and m.response_latency_sec is not None
-    ]
-    if not latencies:
-        return None
-    return sum(latencies) / len(latencies)
-
-
 def _build_transcript(messages: list[Message]) -> str:
     lines = []
     for m in messages:
@@ -65,7 +54,7 @@ async def grade_diagnosis(session: Session, submission: DiagnosisCreate, db: Asy
     ).scalar_one()
     messages = await get_session_messages(session.id, db)
 
-    avg_latency = _avg_student_latency(messages)
+    avg_latency = avg_student_latency(messages)
     session.avg_response_latency_sec = avg_latency  # refresh the metric
     transcript = _build_transcript(messages)
 

@@ -32,7 +32,7 @@ from app.services.session_service import (
     create_new_session,
     get_active_session,
     get_session_messages,
-    send_student_message_and_get_reply,
+    handle_student_message,
 )
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -137,10 +137,11 @@ async def get_session(
     return _session_out(session, messages, score_out, reveal)
 
 
-@router.post("/{session_id}/messages", response_model=MessageOut, status_code=201)
+@router.post("/{session_id}/messages", response_model=MessageOut, status_code=202)
 async def send_message(
     session_id: uuid.UUID,
     body: MessageCreate,
+    instant: bool = False,
     current_user: User = Depends(require_role("student")),
     db: AsyncSession = Depends(get_db),
 ) -> MessageOut:
@@ -157,13 +158,13 @@ async def send_message(
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=409, detail="Session is not active")
 
-    patient_reply = await send_student_message_and_get_reply(session, body.content, db)
+    student_msg = await handle_student_message(session, body.content, instant, db)
     return MessageOut(
-        id=patient_reply.id,
-        role=patient_reply.role,
-        content=patient_reply.content,
-        sent_at=patient_reply.sent_at,
-        response_latency_sec=patient_reply.response_latency_sec,
+        id=student_msg.id,
+        role=student_msg.role,
+        content=student_msg.content,
+        sent_at=student_msg.sent_at,
+        response_latency_sec=student_msg.response_latency_sec,
     )
 
 

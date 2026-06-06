@@ -201,56 +201,181 @@ async def test_get_session_messages_returns_ordered(db_session, setup):
     assert messages[1].content == "Hello"
 
 
-async def test_send_student_message_and_get_reply(db_session, setup):
-    _, stu, course, disease = setup
+# --- handle_student_message ---
 
+async def _session_with_opening(db_session, stu, course, disease, *, task_id=None):
     session = Session(
         disease_id=disease.id, user_id=stu.id, course_id=course.id,
         started_at=datetime.now(timezone.utc), status=SessionStatus.active, turn_count=0,
+        pending_reply_task_id=task_id,
     )
     db_session.add(session)
     await db_session.flush()
-
-    opening = Message(
+    db_session.add(Message(
         session_id=session.id, role=MessageRole.patient,
         content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
-    )
-    db_session.add(opening)
+    ))
     await db_session.commit()
     await db_session.refresh(session)
+    return session
 
-    with patch("app.services.session_service.gateway") as mock_gw:
-        mock_gw.generate_patient_message = AsyncMock(return_value="I feel really low.")
-        from app.services.session_service import send_student_message_and_get_reply
-        patient_reply = await send_student_message_and_get_reply(
-            session, "Tell me more about your symptoms.", db_session
+
+async def test_handle_student_message_saves_with_latency_and_recomputes_avg(db_session, setup):
+    _, stu, course, disease = setup
+    session = await _session_with_opening(db_session, stu, course, disease)
+
+    with patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task:
+        from app.services.session_service import handle_student_message
+        student_msg = await handle_student_message(
+            session, "Tell me more about your symptoms.", instant=False, db=db_session
         )
 
-    # Patient reply is returned
-    assert patient_reply.role == MessageRole.patient
-    assert patient_reply.content == "I feel really low."
-
-    # turn_count incremented
-    await db_session.refresh(session)
-    assert session.turn_count == 1
-
-    # Student message recorded with latency
-    from sqlalchemy import select
-    from app.models.message import Message as Msg
-    all_msgs = (
-        await db_session.execute(
-            select(Msg).where(Msg.session_id == session.id).order_by(Msg.sent_at.asc(), Msg.created_at.asc())
-        )
-    ).scalars().all()
-    assert len(all_msgs) == 3  # opening + student + patient reply
-    student_msg = all_msgs[1]
     assert student_msg.role == MessageRole.student
     assert student_msg.content == "Tell me more about your symptoms."
     assert student_msg.response_latency_sec is not None
     assert student_msg.response_latency_sec >= 0
 
-    # LLM was called with correct conversation history
-    call_args = mock_gw.generate_patient_message.call_args
-    history = call_args.args[3] if len(call_args.args) > 3 else call_args.kwargs.get("conversation_history")
-    assert history is not None
-    assert any(h["role"] == "user" for h in history)
+    await db_session.refresh(session)
+    assert session.avg_response_latency_sec == student_msg.response_latency_sec
+    mock_task.apply_async.assert_called_once()
+
+
+async def test_handle_student_message_revokes_old_task_and_schedules_with_eta(db_session, setup):
+    _, stu, course, disease = setup
+    session = await _session_with_opening(db_session, stu, course, disease, task_id="old-task")
+
+    with patch("app.services.session_service.celery") as mock_celery, \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task, \
+         patch("app.services.session_service._reply_delay_seconds", return_value=120.0):
+        from app.services.session_service import handle_student_message
+        student_msg = await handle_student_message(
+            session, "I've been having trouble sleeping.", instant=False, db=db_session
+        )
+
+    mock_celery.control.revoke.assert_called_once_with("old-task")
+
+    await db_session.refresh(session)
+    assert session.pending_reply_task_id is not None
+    assert session.pending_reply_task_id != "old-task"
+
+    mock_task.apply_async.assert_called_once()
+    call_kwargs = mock_task.apply_async.call_args.kwargs
+    assert call_kwargs["args"] == [str(session.id)]
+    assert call_kwargs["task_id"] == session.pending_reply_task_id
+    assert "eta" in call_kwargs and call_kwargs["eta"] is not None
+    assert student_msg.session_id == session.id
+
+
+async def test_handle_student_message_instant_dispatches_without_eta(db_session, setup):
+    _, stu, course, disease = setup
+    session = await _session_with_opening(db_session, stu, course, disease)
+
+    with patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task:
+        from app.services.session_service import handle_student_message
+        await handle_student_message(
+            session, "Are you there?", instant=True, db=db_session
+        )
+
+    mock_task.apply_async.assert_called_once()
+    call_kwargs = mock_task.apply_async.call_args.kwargs
+    assert "eta" not in call_kwargs
+
+
+# --- _reply_delay_seconds ---
+
+@pytest.mark.parametrize("speech_style, expected_range", [
+    ("flat", (3600, 4 * 3600)),
+    ("tangential", (15 * 60, 60 * 60)),
+    ("disorganized", (0, 30 * 60)),
+    ("anxious", (5 * 60, 30 * 60)),  # unrecognized style falls back to the default range
+])
+def test_reply_delay_seconds_uses_range_for_speech_style(speech_style, expected_range):
+    from app.services.session_service import _reply_delay_seconds
+
+    with patch("app.services.session_service.random.uniform", return_value=99.0) as mock_uniform:
+        result = _reply_delay_seconds(speech_style)
+
+    mock_uniform.assert_called_once_with(*expected_range)
+    assert result == 99.0
+
+
+def test_reply_delay_seconds_pressured_is_immediate():
+    from app.services.session_service import _reply_delay_seconds
+
+    assert _reply_delay_seconds("pressured") == 0
+
+
+# --- avg_student_latency (relocated from grading_service) ---
+
+def _msg(role, latency):
+    return Message(
+        session_id=uuid.uuid4(), role=role, content="x",
+        sent_at=datetime.now(timezone.utc), is_nudge=False,
+        response_latency_sec=latency,
+    )
+
+
+def test_avg_student_latency_returns_mean_of_student_latencies():
+    from app.services.session_service import avg_student_latency
+
+    messages = [
+        _msg(MessageRole.patient, None),
+        _msg(MessageRole.student, 100.0),
+        _msg(MessageRole.student, 300.0),
+    ]
+    assert avg_student_latency(messages) == 200.0
+
+
+def test_avg_student_latency_returns_none_when_no_student_latencies():
+    from app.services.session_service import avg_student_latency
+
+    messages = [_msg(MessageRole.patient, None), _msg(MessageRole.student, None)]
+    assert avg_student_latency(messages) is None
+
+
+# --- _avg_student_latency_sql (SQL-aggregate hot-path variant) ---
+
+async def test_avg_student_latency_sql_computes_mean_from_db(db_session, setup):
+    _, stu, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add_all([
+        Message(session_id=session.id, role=MessageRole.patient, content="hi",
+                sent_at=datetime.now(timezone.utc), is_nudge=False, response_latency_sec=None),
+        Message(session_id=session.id, role=MessageRole.student, content="hey",
+                sent_at=datetime.now(timezone.utc), is_nudge=False, response_latency_sec=120.0),
+        Message(session_id=session.id, role=MessageRole.student, content="hey2",
+                sent_at=datetime.now(timezone.utc), is_nudge=False, response_latency_sec=480.0),
+    ])
+    await db_session.commit()
+
+    from app.services.session_service import _avg_student_latency_sql
+    result = await _avg_student_latency_sql(session.id, db_session)
+    assert result == 300.0
+
+
+async def test_avg_student_latency_sql_returns_none_when_no_student_latencies(db_session, setup):
+    _, stu, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Message(
+        session_id=session.id, role=MessageRole.patient, content="hi",
+        sent_at=datetime.now(timezone.utc), is_nudge=False, response_latency_sec=None,
+    ))
+    await db_session.commit()
+
+    from app.services.session_service import _avg_student_latency_sql
+    result = await _avg_student_latency_sql(session.id, db_session)
+    assert result is None

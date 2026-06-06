@@ -2,18 +2,58 @@ from __future__ import annotations
 
 import random
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.celery_app import celery
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
 from app.services.llm_gateway import gateway, patient_identity
-import app.tasks.push_notifications as _push_mod
+
+_DELAY_RANGES_SEC = {
+    "pressured":    (0, 0),
+    "flat":         (3600, 4 * 3600),
+    "tangential":   (15 * 60, 60 * 60),
+    "disorganized": (0, 30 * 60),
+}
+_DEFAULT_DELAY_RANGE_SEC = (5 * 60, 30 * 60)
+
+
+def _reply_delay_seconds(speech_style: str) -> float:
+    lo, hi = _DELAY_RANGES_SEC.get(speech_style, _DEFAULT_DELAY_RANGE_SEC)
+    if lo == hi:
+        return lo
+    return random.uniform(lo, hi)
+
+
+def avg_student_latency(messages: list[Message]) -> float | None:
+    latencies = [
+        m.response_latency_sec
+        for m in messages
+        if m.role == MessageRole.student and m.response_latency_sec is not None
+    ]
+    if not latencies:
+        return None
+    return sum(latencies) / len(latencies)
+
+
+async def _avg_student_latency_sql(session_id: uuid.UUID, db: AsyncSession) -> float | None:
+    """SQL-aggregate equivalent of avg_student_latency for the per-message hot path —
+    avoids loading the full transcript just to take a mean."""
+    result = await db.execute(
+        select(func.avg(Message.response_latency_sec)).where(
+            Message.session_id == session_id,
+            Message.role == MessageRole.student,
+            Message.response_latency_sec.is_not(None),
+        )
+    )
+    avg = result.scalar_one_or_none()
+    return float(avg) if avg is not None else None
 
 
 async def _get_disease_pool(course_id: uuid.UUID, db: AsyncSession) -> list[Disease]:
@@ -92,11 +132,14 @@ async def get_session_messages(session_id: uuid.UUID, db: AsyncSession) -> list[
     return list(result.scalars().all())
 
 
-async def send_student_message_and_get_reply(
+async def handle_student_message(
     session: Session,
     student_content: str,
+    instant: bool,
     db: AsyncSession,
 ) -> Message:
+    """Save the student's message, refresh latency stats, and (re)schedule the
+    delayed bot reply. Reply generation itself happens in generate_and_send_reply."""
     disease = (
         await db.execute(select(Disease).where(Disease.id == session.disease_id))
     ).scalar_one()
@@ -127,45 +170,28 @@ async def send_student_message_and_get_reply(
         response_latency_sec=latency,
     )
     db.add(student_msg)
-    # Commit the student's message before calling the LLM so a gateway failure
-    # (502/timeout) doesn't roll it back and force the student to retype.
-    await db.commit()
+    await db.flush()
 
-    all_messages = await get_session_messages(session.id, db)
-    history = [
-        {
-            "role": "user" if m.role == MessageRole.student else "model",
-            "parts": [{"text": m.content}],
-        }
-        for m in all_messages
-    ]
+    session.avg_response_latency_sec = await _avg_student_latency_sql(session.id, db)
 
-    patient_name, patient_age = patient_identity(session.id.int)
-    reply_text = await gateway.generate_patient_message(disease, patient_name, patient_age, history)
+    if session.pending_reply_task_id:
+        try:
+            celery.control.revoke(session.pending_reply_task_id)
+        except Exception:
+            pass
 
-    patient_msg = Message(
-        session_id=session.id,
-        role=MessageRole.patient,
-        content=reply_text,
-        sent_at=datetime.now(timezone.utc),
-        is_nudge=False,
-    )
-    db.add(patient_msg)
-
-    session.turn_count = (session.turn_count or 0) + 1
+    task_id = str(uuid.uuid4())
+    session.pending_reply_task_id = task_id
     db.add(session)
-
     await db.commit()
-    await db.refresh(patient_msg)
+    await db.refresh(student_msg)
 
-    try:
-        _push_mod.send_push.delay(
-            str(session.user_id),
-            "PocketPatient",
-            "Your patient replied",
-            {"type": "new_message", "session_id": str(session.id)},
-        )
-    except Exception:
-        pass
+    from app.tasks.bot_reply import generate_and_send_reply
 
-    return patient_msg
+    dispatch_kwargs: dict = {"args": [str(session.id)], "task_id": task_id}
+    if not instant:
+        delay = _reply_delay_seconds(disease.speech_style)
+        dispatch_kwargs["eta"] = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    generate_and_send_reply.apply_async(**dispatch_kwargs)
+
+    return student_msg
