@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.celery_app import celery
 from app.database import get_db
 from app.deps import get_current_user, require_role
 from app.models.course import Course
@@ -204,6 +205,12 @@ async def diagnose(
     db.add(score)
     session.status = SessionStatus.diagnosed
     session.completed_at = datetime.now(timezone.utc)
+    if session.pending_reply_task_id:
+        try:
+            celery.control.revoke(session.pending_reply_task_id)
+        except Exception:
+            pass
+        session.pending_reply_task_id = None
     db.add(session)
     await db.commit()
     await db.refresh(score)

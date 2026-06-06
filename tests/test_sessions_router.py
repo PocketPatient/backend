@@ -479,6 +479,34 @@ async def test_diagnose_correct_reveals_and_completes(client, setup, db_session)
     assert row is not None
 
 
+async def test_diagnose_correct_revokes_and_clears_pending_reply_task_id(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+    session = await _seed_active_session(db_session, stu, course, disease)
+    session.pending_reply_task_id = "queued-task-123"
+    db_session.add(session)
+    await db_session.commit()
+
+    with patch("app.services.grading_service.gateway") as gw, \
+         patch("app.routers.sessions.celery") as mock_celery:
+        gw.grade_diagnosis = AsyncMock(return_value={
+            "is_correct": True, "rubric_score": 92.0, "feedback": "Excellent."})
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/diagnose",
+            json=_diag_body(primary_dx="GAD"),
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 200
+    mock_celery.control.revoke.assert_called_once_with("queued-task-123")
+
+    from sqlalchemy import select
+    refreshed = (await db_session.execute(
+        select(Session).where(Session.id == session.id))).scalar_one()
+    await db_session.refresh(refreshed)
+    assert refreshed.status == SessionStatus.diagnosed
+    assert refreshed.pending_reply_task_id is None
+
+
 async def test_diagnose_incorrect_returns_hint_no_score(client, setup, db_session):
     _, _, stu, stu_token, course, disease = setup
     session = await _seed_active_session(db_session, stu, course, disease)
