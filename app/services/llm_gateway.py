@@ -19,6 +19,14 @@ _PATIENT_NAMES = [
 
 _OPENING_PROMPT = "Generate your first message reaching out to a doctor for help."
 
+_NUDGE_PROMPT_TEMPLATE = (
+    "You are the same patient. You sent a message {hours} hours ago and the doctor "
+    "hasn't replied.\n"
+    "Your nudge tone is: {tone}\n"
+    "Example of your nudge style: {example}\n"
+    "Write a short follow-up message (1-2 sentences) that is consistent with your condition."
+)
+
 
 class _GradingSchema(_PydBaseModel):
     is_correct: bool
@@ -100,6 +108,27 @@ class LLMGateway:
         )
         if not response.text:
             raise HTTPException(status_code=502, detail="LLM returned empty response")
+        return response.text
+
+    async def generate_nudge_message(
+        self, disease: Disease, patient_name: str, patient_age: int, hours_since_last_message: int
+    ) -> str:
+        system_prompt = self._build_system_prompt(disease, patient_name, patient_age)
+        nudge = disease.nudge_behavior
+        prompt = _NUDGE_PROMPT_TEMPLATE.format(
+            hours=hours_since_last_message,
+            tone=nudge.get("tone", ""),
+            example=nudge.get("example", ""),
+        )
+        contents = [{"role": "user", "parts": [{"text": prompt}]}]
+        response = await asyncio.to_thread(
+            self.client.models.generate_content,
+            model=self.model,
+            contents=contents,
+            config=self._gen_config(system_prompt),
+        )
+        if not response.text:
+            raise HTTPException(status_code=502, detail="LLM returned empty nudge response")
         return response.text
 
     def _build_grading_prompt(self, disease: Disease, submission, transcript: str) -> str:

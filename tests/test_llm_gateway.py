@@ -337,3 +337,74 @@ async def test_generate_hint_prompt_warns_against_revealing(mock_genai):
     assert "Major Depressive Disorder" in prompt      # actual, used in the "do not name" instruction
     lowered = prompt.lower()
     assert "without revealing" in lowered or "do not name" in lowered
+
+
+@pytest.mark.asyncio
+async def test_generate_nudge_message_returns_text(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = "Are you still there, doc?"
+    gw = LLMGateway()
+    disease = _make_disease()
+    disease.nudge_behavior = {"frequency": "high", "tone": "anxious", "example": "Hello? Anyone?"}
+
+    result = await gw.generate_nudge_message(disease, "Sarah", 34, 6)
+
+    assert result == "Are you still there, doc?"
+    mock_client.models.generate_content.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_generate_nudge_message_prompt_contains_hours_tone_example(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    gw = LLMGateway()
+    disease = _make_disease(speech_style="flat")
+    disease.nudge_behavior = {"frequency": "low", "tone": "withdrawn", "example": "...still waiting"}
+
+    await gw.generate_nudge_message(disease, "James", 42, 30)
+
+    contents = mock_client.models.generate_content.call_args.kwargs["contents"]
+    prompt = contents[0]["parts"][0]["text"]
+    assert "30" in prompt
+    assert "withdrawn" in prompt
+    assert "...still waiting" in prompt
+
+    config = mock_client.models.generate_content.call_args.kwargs["config"]
+    assert "James" in config.system_instruction
+    assert "flat" in config.system_instruction
+
+
+@pytest.mark.asyncio
+async def test_generate_nudge_message_handles_empty_example(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    gw = LLMGateway()
+    disease = _make_disease()
+    disease.nudge_behavior = {"frequency": "medium", "tone": "irritable", "example": ""}
+
+    result = await gw.generate_nudge_message(disease, "Sarah", 34, 24)
+
+    assert result == "I've been feeling really down lately..."
+    contents = mock_client.models.generate_content.call_args.kwargs["contents"]
+    prompt = contents[0]["parts"][0]["text"]
+    assert "irritable" in prompt
+
+
+@pytest.mark.asyncio
+async def test_generate_nudge_message_empty_response_raises_502(mock_genai):
+    from app.services.llm_gateway import LLMGateway
+    from fastapi import HTTPException
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.return_value.text = ""
+    gw = LLMGateway()
+    disease = _make_disease()
+    disease.nudge_behavior = {"frequency": "high", "tone": "anxious", "example": ""}
+
+    with pytest.raises(HTTPException) as exc_info:
+        await gw.generate_nudge_message(disease, "Sarah", 34, 6)
+    assert exc_info.value.status_code == 502
