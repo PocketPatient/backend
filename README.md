@@ -133,13 +133,26 @@ This creates `student@test.pocketpatient.dev` and `professor@test.pocketpatient.
 ## Running the Server
 
 ```powershell
-.venv\Scripts\activate
-uv run uvicorn app.main:app --reload --port 8000
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload
 ```
 
 - API: `http://localhost:8000/api/v1`
 - Interactive docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health` → `{"status":"ok"}`
+
+> **Why `.venv\Scripts\python.exe -m uvicorn` instead of `uv run uvicorn`?**
+> On Windows with Conda/Miniconda as the base Python, `uv run uvicorn` and bare `uvicorn` invoke the
+> `.venv\Scripts\uvicorn.exe` wrapper, which hard-codes the Conda base interpreter rather than the
+> venv's isolated interpreter. That interpreter doesn't have `app/` in `sys.path[0]`, so it silently
+> loads stale cached modules instead of the current source tree — endpoints added in recent weeks
+> appear missing from `/docs`, and API calls return `404 Not Found` (Starlette route-miss) instead of
+> the expected response. Running `python -m uvicorn` via the venv's own interpreter guarantees CWD is
+> `sys.path[0]` and the live source is always loaded.
+
+> **OneDrive + `--reload` note (Windows):** When the project lives inside an OneDrive-synced folder,
+> uvicorn's `--reload` file watcher may not detect file changes. If you edit a route and the change
+> doesn't appear in `/docs` after a few seconds, kill the server (`Ctrl+C`) and restart it manually
+> rather than waiting for hot-reload to pick it up.
 
 > **Android emulator note:** The emulator cannot reach `localhost` on your host machine. Use `http://10.0.2.2:8000/api/v1` in the Flutter app config. On a physical Android device, use your machine's LAN IP (e.g. `http://192.168.1.x:8000/api/v1`).
 
