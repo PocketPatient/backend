@@ -127,6 +127,46 @@ async def test_generate_patient_message_empty_response_raises_502(mock_genai):
 
 
 @pytest.mark.asyncio
+async def test_generate_opening_message_server_error_raises_502(mock_genai):
+    from google.genai import errors
+
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.side_effect = errors.ServerError(
+        503, {"error": {"code": 503, "message": "high demand", "status": "UNAVAILABLE"}}
+    )
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.generate_opening_message(_make_disease(), "Sarah", 34)
+    assert exc.value.status_code == 502
+    assert "high demand" in exc.value.detail
+
+
+@pytest.mark.asyncio
+async def test_grade_diagnosis_server_error_raises_502(mock_genai):
+    from google.genai import errors
+
+    from fastapi import HTTPException
+
+    from app.services.llm_gateway import LLMGateway
+
+    _, mock_client = mock_genai
+    mock_client.models.generate_content.side_effect = errors.ServerError(
+        503, {"error": {"code": 503, "message": "high demand", "status": "UNAVAILABLE"}}
+    )
+    gw = LLMGateway()
+
+    with pytest.raises(HTTPException) as exc:
+        await gw.grade_diagnosis(_make_disease(), _make_submission(), "t")
+    assert exc.value.status_code == 502
+    assert "high demand" in exc.value.detail
+
+
+@pytest.mark.asyncio
 async def test_generate_opening_message_no_dsm_code(mock_genai):
     from app.services.llm_gateway import LLMGateway
 

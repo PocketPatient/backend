@@ -6,6 +6,7 @@ import random
 
 from fastapi import HTTPException
 from google import genai
+from google.genai import errors as genai_errors
 from google.genai.types import GenerateContentConfig, ThinkingConfig
 from pydantic import BaseModel as _PydBaseModel
 
@@ -58,6 +59,14 @@ class LLMGateway:
             thinking_config=ThinkingConfig(thinking_budget=0),
         )
 
+    async def _generate_content(self, **kwargs):
+        try:
+            return await asyncio.to_thread(self.client.models.generate_content, **kwargs)
+        except genai_errors.APIError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"LLM provider error: {exc.message or exc.status}"
+            ) from exc
+
     def _build_system_prompt(self, disease: Disease, patient_name: str, patient_age: int) -> str:
         symptoms = ", ".join(disease.key_symptoms) if disease.key_symptoms else "various symptoms"
         dsm_part = f" ({disease.dsm_code})" if disease.dsm_code else ""
@@ -82,8 +91,7 @@ class LLMGateway:
     ) -> str:
         system_prompt = self._build_system_prompt(disease, patient_name, patient_age)
         contents = [{"role": "user", "parts": [{"text": _OPENING_PROMPT}]}]
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
+        response = await self._generate_content(
             model=self.model,
             contents=contents,
             config=self._gen_config(system_prompt),
@@ -100,8 +108,7 @@ class LLMGateway:
         conversation_history: list[dict],
     ) -> str:
         system_prompt = self._build_system_prompt(disease, patient_name, patient_age)
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
+        response = await self._generate_content(
             model=self.model,
             contents=conversation_history,
             config=self._gen_config(system_prompt),
@@ -121,8 +128,7 @@ class LLMGateway:
             example=nudge.get("example", ""),
         )
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
+        response = await self._generate_content(
             model=self.model,
             contents=contents,
             config=self._gen_config(system_prompt),
@@ -163,8 +169,7 @@ class LLMGateway:
             response_mime_type="application/json",
             response_schema=_GradingSchema,
         )
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
+        response = await self._generate_content(
             model=self.model,
             contents=contents,
             config=config,
@@ -196,8 +201,7 @@ class LLMGateway:
             max_output_tokens=200,
             thinking_config=ThinkingConfig(thinking_budget=0),
         )
-        response = await asyncio.to_thread(
-            self.client.models.generate_content,
+        response = await self._generate_content(
             model=self.model,
             contents=contents,
             config=config,
