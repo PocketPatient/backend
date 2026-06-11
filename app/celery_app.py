@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from celery import Celery
-from celery.signals import worker_process_init
+from celery.signals import task_prerun, worker_process_init
 
 from app.config import settings
 
-celery = Celery("pocket_patient", broker=settings.redis_url)
+celery = Celery(
+    "pocket_patient",
+    broker=settings.redis_url,
+    include=[
+        "app.tasks.bot_reply",
+        "app.tasks.nudge",
+        "app.tasks.case_initiation",
+        "app.tasks.push_notifications",
+    ],
+)
 celery.conf.update(
     result_backend=settings.redis_url,
     timezone="UTC",
@@ -26,3 +35,16 @@ celery.conf.update(
 def _init_firebase(**_kwargs: object) -> None:
     from app.services.firebase import init_firebase
     init_firebase()
+
+
+@task_prerun.connect
+def _reset_db_engine_pool(**_kwargs: object) -> None:
+    # Each task body runs inside its own asyncio.run() event loop. Pooled
+    # asyncpg connections are bound to the loop that created them, so a
+    # connection checked out from a previous task's (now-closed) loop raises
+    # AttributeError: 'NoneType' object has no attribute 'send'. Drop the
+    # pool before each task runs (close=False: the old connections'
+    # transports are already dead, so don't try to close them) so this task
+    # gets fresh connections bound to its own loop.
+    from app.database import engine
+    engine.sync_engine.dispose(close=False)
