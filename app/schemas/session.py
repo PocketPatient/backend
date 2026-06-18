@@ -76,3 +76,15 @@ class DiagnosisResult(BaseModel):
     hint: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class SessionStats(BaseModel):
+    total_turns: int
+    total_duration_sec: float | None
+    avg_response_latency_sec: float | None
+    student_msg_len_avg: float | None
+    student_msg_len_min: int | None
+    student_msg_len_max: int | None
+    topic_coverage_score: float
+    topics_covered: list[str]
+    topics_missed: list[str]
