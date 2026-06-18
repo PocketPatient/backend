@@ -66,7 +66,7 @@ async def generate_in_character(
                 "Character break (%s) on session %s attempt %d; regenerating",
                 reason,
                 session_id,
-                attempt,
+                attempt + 1,
             )
             db.add(_system_message(session_id, f"[regenerated: {reason}]"))
     logger.warning(

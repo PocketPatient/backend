@@ -54,23 +54,26 @@ def build_history(messages: list[Message]) -> list[dict]:
 
     head = visible[:HEAD_KEEP]
     tail_candidates = visible[HEAD_KEEP:]
-    # Always guarantee the last message is included.
-    always_last = [tail_candidates[-1]] if tail_candidates else []
-    sliding_pool = tail_candidates[:-1] if tail_candidates else []
-
-    budget = MAX_CONTEXT_TOKENS - sum(_message_tokens(m) for m in head) - sum(
-        _message_tokens(m) for m in always_last
-    )
-    tail: list[Message] = []
-    for m in reversed(sliding_pool):
-        t = _message_tokens(m)
-        if t > budget:
-            break
-        tail.insert(0, m)
-        budget -= t
-
     contents = [_to_content(m) for m in head]
-    contents.append({"role": "user", "parts": [{"text": OMITTED_NOTE}]})
-    contents.extend(_to_content(m) for m in tail)
-    contents.extend(_to_content(m) for m in always_last)
+
+    # Only window (and emit the omitted-note) when there are messages beyond the
+    # head; if the head alone is over budget there is nothing to omit.
+    if tail_candidates:
+        # Always guarantee the most recent message is included.
+        always_last = [tail_candidates[-1]]
+        sliding_pool = tail_candidates[:-1]
+        budget = MAX_CONTEXT_TOKENS - sum(_message_tokens(m) for m in head) - sum(
+            _message_tokens(m) for m in always_last
+        )
+        tail: list[Message] = []
+        for m in reversed(sliding_pool):
+            t = _message_tokens(m)
+            if t > budget:
+                break
+            tail.insert(0, m)
+            budget -= t
+
+        contents.append({"role": "user", "parts": [{"text": OMITTED_NOTE}]})
+        contents.extend(_to_content(m) for m in tail)
+        contents.extend(_to_content(m) for m in always_last)
     return contents
