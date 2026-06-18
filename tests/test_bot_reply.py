@@ -201,3 +201,29 @@ def test_generate_and_send_reply_retries_on_exception():
 
         with pytest.raises(Retry):
             generate_and_send_reply.apply(args=["session-id-str"], throw=True)
+
+
+async def test_generate_and_send_regenerates_on_character_break(br_setup, db_session):
+    from app.tasks.bot_reply import _generate_and_send
+
+    stu, course, disease = br_setup
+    session = await _make_session(db_session, stu, course, disease, task_id="task-1")
+
+    replies = iter(["As an AI, I cannot do that.", "I just feel numb, doctor."])
+
+    async def _side_effect(*args, **kwargs):
+        return next(replies)
+
+    with patch("app.tasks.bot_reply.AsyncSessionLocal", return_value=_ctx(db_session)), \
+         patch("app.tasks.bot_reply.gateway") as mock_gw, \
+         patch("app.tasks.bot_reply.send_push"):
+        mock_gw.generate_patient_message = AsyncMock(side_effect=_side_effect)
+        await _generate_and_send(str(session.id), "task-1")
+
+    rows = (await db_session.execute(
+        select(Message).where(Message.session_id == session.id)
+    )).scalars().all()
+    system_rows = [m for m in rows if m.role == MessageRole.system]
+    patient_replies = [m for m in rows if m.role == MessageRole.patient and not m.is_nudge]
+    assert any("regenerated" in m.content for m in system_rows)
+    assert patient_replies[-1].content == "I just feel numb, doctor."

@@ -12,7 +12,8 @@ from app.database import AsyncSessionLocal
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
-from app.services.context_window import count_tokens
+from app.services.character_guardrail import generate_in_character
+from app.services.context_window import build_history, count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 from app.services.session_service import get_session_messages
 from app.tasks.push_notifications import send_push
@@ -37,16 +38,17 @@ async def _generate_and_send(session_id: str, my_task_id: str) -> None:
             await db.execute(select(Disease).where(Disease.id == session.disease_id))
         ).scalar_one()
         messages = await get_session_messages(session.id, db)
-        history = [
-            {
-                "role": "user" if m.role == MessageRole.student else "model",
-                "parts": [{"text": m.content}],
-            }
-            for m in messages
-        ]
+        history = build_history(messages)
 
         patient_name, patient_age = patient_identity(session.id.int)
-        reply_text = await gateway.generate_patient_message(disease, patient_name, patient_age, history)
+        reply_text = await generate_in_character(
+            lambda: gateway.generate_patient_message(
+                disease, patient_name, patient_age, history
+            ),
+            disease_name=disease.name,
+            db=db,
+            session_id=session.id,
+        )
 
         db.add(Message(
             session_id=session.id,
