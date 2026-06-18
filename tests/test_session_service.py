@@ -391,3 +391,25 @@ async def test_opening_message_gets_token_count(db_session, setup):
 
     assert message.token_count is not None
     assert message.token_count > 0
+
+
+async def test_opening_message_falls_back_on_persistent_break(db_session, setup):
+    _, stu, course, disease = setup  # disease.name == "GAD"
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="As an AI, I greet you.")
+        from app.services.session_service import create_new_session
+        from app.services.character_guardrail import FALLBACK_TEXT
+        session, message = await create_new_session(stu.id, course.id, db_session)
+
+    assert message.content == FALLBACK_TEXT
+
+    from sqlalchemy import select
+    from app.models.message import Message, MessageRole
+    system_rows = (await db_session.execute(
+        select(Message).where(
+            Message.session_id == session.id,
+            Message.role == MessageRole.system,
+        )
+    )).scalars().all()
+    assert any("fallback used" in m.content for m in system_rows)

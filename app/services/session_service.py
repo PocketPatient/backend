@@ -13,6 +13,7 @@ from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
+from app.services.character_guardrail import generate_in_character
 from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 
@@ -92,7 +93,12 @@ async def create_new_session(
     await db.flush()
 
     patient_name, patient_age = patient_identity(session.id.int)
-    opening_text = await gateway.generate_opening_message(disease, patient_name, patient_age)
+    opening_text = await generate_in_character(
+        lambda: gateway.generate_opening_message(disease, patient_name, patient_age),
+        disease_name=disease.name,
+        db=db,
+        session_id=session.id,
+    )
 
     now = datetime.now(timezone.utc)
     message = Message(
