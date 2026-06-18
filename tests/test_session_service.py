@@ -379,3 +379,15 @@ async def test_avg_student_latency_sql_returns_none_when_no_student_latencies(db
     from app.services.session_service import _avg_student_latency_sql
     result = await _avg_student_latency_sql(session.id, db_session)
     assert result is None
+
+
+async def test_opening_message_gets_token_count(db_session, setup):
+    _, stu, course, disease = setup
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hi, I need some help.")
+        from app.services.session_service import create_new_session
+        _, message = await create_new_session(stu.id, course.id, db_session)
+
+    assert message.token_count is not None
+    assert message.token_count > 0

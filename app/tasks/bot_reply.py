@@ -12,6 +12,7 @@ from app.database import AsyncSessionLocal
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
+from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 from app.services.session_service import get_session_messages
 from app.tasks.push_notifications import send_push
@@ -53,6 +54,7 @@ async def _generate_and_send(session_id: str, my_task_id: str) -> None:
             content=reply_text,
             sent_at=datetime.now(timezone.utc),
             is_nudge=False,
+            token_count=count_tokens(reply_text),
         ))
         session.turn_count = (session.turn_count or 0) + 1
         db.add(session)

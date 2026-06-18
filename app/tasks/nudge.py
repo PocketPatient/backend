@@ -13,6 +13,7 @@ from app.database import AsyncSessionLocal
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
+from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 from app.tasks.push_notifications import send_push
 
@@ -105,6 +106,7 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
         content=text,
         sent_at=now,
         is_nudge=True,
+        token_count=count_tokens(text),
     ))
     await db.commit()
 

@@ -13,6 +13,7 @@ from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
+from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 
 _DELAY_RANGES_SEC = {
@@ -100,6 +101,7 @@ async def create_new_session(
         content=opening_text,
         sent_at=now,
         is_nudge=False,
+        token_count=count_tokens(opening_text),
     )
     db.add(message)
     await db.commit()
@@ -168,6 +170,7 @@ async def handle_student_message(
         sent_at=now,
         is_nudge=False,
         response_latency_sec=latency,
+        token_count=count_tokens(student_content),
     )
     db.add(student_msg)
     await db.flush()
