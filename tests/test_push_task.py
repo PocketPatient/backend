@@ -90,3 +90,23 @@ def test_send_push_retries_on_exception():
         # apply() with throw=True surfaces Celery's Retry exception on the first attempt.
         with pytest.raises(Retry):
             send_push.apply(args=["user-id", "t", "b", {}], throw=True)
+
+
+def test_send_push_clears_token_and_does_not_retry_on_unregistered():
+    from firebase_admin import messaging
+
+    with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
+         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
+         patch("app.tasks.push_notifications.push_service") as mock_ps, \
+         patch("app.tasks.push_notifications._clear_fcm_token",
+               MagicMock(return_value="clear-coro")):
+        # 1st run_task_async -> token lookup; 2nd -> clear-token coroutine.
+        mock_run.side_effect = ["device-token", None]
+        mock_ps.send_push_notification.side_effect = messaging.UnregisteredError("gone")
+
+        from app.tasks.push_notifications import _clear_fcm_token, send_push
+
+        # No Retry raised — returns normally.
+        send_push.apply(args=["user-id", "t", "b", {}], throw=True)
+
+        _clear_fcm_token.assert_called_once_with("user-id")
