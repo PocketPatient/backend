@@ -47,9 +47,10 @@ async def test_get_fcm_token_returns_none_when_unset(student, db_session):
 # --- send_push Celery task (sync — patches asyncio.run) ---
 
 def test_send_push_skips_when_no_token():
-    with patch("app.tasks.push_notifications.asyncio") as mock_asyncio, \
+    with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
+         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_asyncio.run.return_value = None  # no token
+        mock_run.return_value = None  # no token
 
         from app.tasks.push_notifications import send_push
 
@@ -59,9 +60,10 @@ def test_send_push_skips_when_no_token():
 
 
 def test_send_push_calls_push_service_with_token():
-    with patch("app.tasks.push_notifications.asyncio") as mock_asyncio, \
+    with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
+         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_asyncio.run.return_value = "device-token-xyz"
+        mock_run.return_value = "device-token-xyz"
 
         from app.tasks.push_notifications import send_push
 
@@ -76,9 +78,10 @@ def test_send_push_calls_push_service_with_token():
 
 
 def test_send_push_retries_on_exception():
-    with patch("app.tasks.push_notifications.asyncio") as mock_asyncio, \
+    with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
+         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_asyncio.run.return_value = "token"
+        mock_run.return_value = "token"
         mock_ps.send_push_notification.side_effect = Exception("FCM unavailable")
 
         from app.tasks.push_notifications import send_push

@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.celery_app import celery
 from app.config import settings
+from app.tasks._run import run_task_async
 from app.database import AsyncSessionLocal
 from app.models.course import Course
 from app.models.enrollment import Enrollment
@@ -92,7 +93,7 @@ def _random_eta(window_end_utc: datetime) -> datetime:
 
 @celery.task
 def check_and_initiate_cases() -> None:
-    pairs = asyncio.run(_fetch_eligible_pairs())
+    pairs = run_task_async(_fetch_eligible_pairs())
     if not pairs:
         return
 
@@ -136,7 +137,7 @@ async def _check_and_create(
 @celery.task
 def initiate_case(user_id: str, course_id: str) -> None:
     try:
-        session_id = asyncio.run(_check_and_create(user_id, course_id))
+        session_id = run_task_async(_check_and_create(user_id, course_id))
     except HTTPException as exc:
         logger.warning(
             "initiate_case: skipping user=%s course=%s — %s",

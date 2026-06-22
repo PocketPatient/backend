@@ -193,10 +193,11 @@ def test_check_and_initiate_cases_dispatches_for_eligible_students():
     course_id = uuid.uuid4()
     window_end = datetime(2026, 6, 4, 22, 0, 0, tzinfo=timezone.utc)
 
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._fetch_eligible_pairs", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.sync_redis") as mock_redis_mod, \
          patch("app.tasks.case_initiation.initiate_case") as mock_task:
-        mock_asyncio.run.return_value = [(user_id, course_id, window_end, "UTC")]
+        mock_run.return_value = [(user_id, course_id, window_end, "UTC")]
 
         mock_r = MagicMock()
         mock_r.set.return_value = True  # key was newly set (not a duplicate)
@@ -215,10 +216,11 @@ def test_check_and_initiate_cases_skips_duplicate_via_redis():
     course_id = uuid.uuid4()
     window_end = datetime(2026, 6, 4, 22, 0, 0, tzinfo=timezone.utc)
 
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._fetch_eligible_pairs", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.sync_redis") as mock_redis_mod, \
          patch("app.tasks.case_initiation.initiate_case") as mock_task:
-        mock_asyncio.run.return_value = [(user_id, course_id, window_end, "UTC")]
+        mock_run.return_value = [(user_id, course_id, window_end, "UTC")]
 
         mock_r = MagicMock()
         mock_r.set.return_value = False  # key already exists — duplicate
@@ -236,9 +238,10 @@ def test_initiate_case_creates_session_and_sends_push():
     session_id = uuid.uuid4()
     user_id = str(uuid.uuid4())
 
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._check_and_create", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.send_push") as mock_push:
-        mock_asyncio.run.return_value = session_id
+        mock_run.return_value = session_id
 
         from app.tasks.case_initiation import initiate_case
         initiate_case(user_id, str(uuid.uuid4()))
@@ -251,9 +254,10 @@ def test_initiate_case_creates_session_and_sends_push():
 
 
 def test_initiate_case_skips_push_when_session_already_exists():
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._check_and_create", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.send_push") as mock_push:
-        mock_asyncio.run.return_value = None  # already had a session
+        mock_run.return_value = None  # already had a session
 
         from app.tasks.case_initiation import initiate_case
         initiate_case(str(uuid.uuid4()), str(uuid.uuid4()))
@@ -264,9 +268,10 @@ def test_initiate_case_skips_push_when_session_already_exists():
 def test_initiate_case_skips_on_http_exception():
     from fastapi import HTTPException
 
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._check_and_create", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.send_push") as mock_push:
-        mock_asyncio.run.side_effect = HTTPException(status_code=422, detail="No diseases")
+        mock_run.side_effect = HTTPException(status_code=422, detail="No diseases")
 
         from app.tasks.case_initiation import initiate_case
         initiate_case(str(uuid.uuid4()), str(uuid.uuid4()))
@@ -277,9 +282,10 @@ def test_initiate_case_skips_on_http_exception():
 def test_initiate_case_skips_on_integrity_error():
     from sqlalchemy.exc import IntegrityError
 
-    with patch("app.tasks.case_initiation.asyncio") as mock_asyncio, \
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._check_and_create", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.case_initiation.send_push") as mock_push:
-        mock_asyncio.run.side_effect = IntegrityError("", {}, Exception())
+        mock_run.side_effect = IntegrityError("", {}, Exception())
 
         from app.tasks.case_initiation import initiate_case
         initiate_case(str(uuid.uuid4()), str(uuid.uuid4()))

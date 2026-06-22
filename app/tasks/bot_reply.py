@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 
 from app.celery_app import celery
 from app.database import AsyncSessionLocal
+from app.tasks._run import run_task_async
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
@@ -86,6 +87,6 @@ async def _generate_and_send(session_id: str, my_task_id: str) -> None:
 @celery.task(bind=True, max_retries=3, default_retry_delay=60)
 def generate_and_send_reply(self, session_id: str) -> None:
     try:
-        asyncio.run(_generate_and_send(session_id, self.request.id))
+        run_task_async(_generate_and_send(session_id, self.request.id))
     except Exception as exc:
         raise self.retry(exc=exc)

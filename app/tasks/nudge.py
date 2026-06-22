@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery
 from app.database import AsyncSessionLocal
+from app.tasks._run import run_task_async
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
@@ -138,4 +139,4 @@ async def _run_nudge_check() -> None:
 
 @celery.task
 def check_and_send_nudges() -> None:
-    asyncio.run(_run_nudge_check())
+    run_task_async(_run_nudge_check())

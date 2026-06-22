@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from sqlalchemy import select
@@ -9,6 +8,7 @@ from app.celery_app import celery
 from app.database import AsyncSessionLocal
 from app.models.user import User
 from app.services import push_service
+from app.tasks._run import run_task_async
 
 
 async def _get_fcm_token(user_id: str) -> str | None:
@@ -31,7 +31,7 @@ def send_push(
     body: str,
     data: dict[str, str],
 ) -> None:
-    token = asyncio.run(_get_fcm_token(user_id))
+    token = run_task_async(_get_fcm_token(user_id))
     if not token:
         return
     try:

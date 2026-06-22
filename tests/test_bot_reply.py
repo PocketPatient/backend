@@ -178,23 +178,23 @@ async def test_generate_and_send_rolls_back_when_superseded_during_llm(br_setup,
 
 def test_generate_and_send_reply_invokes_helper_with_session_and_task_id():
     mock_helper = MagicMock(return_value="coro-sentinel")
-    with patch("app.tasks.bot_reply.asyncio") as mock_asyncio, \
+    with patch("app.tasks.bot_reply.run_task_async") as mock_run, \
          patch("app.tasks.bot_reply._generate_and_send", mock_helper):
-        mock_asyncio.run.return_value = None
+        mock_run.return_value = None
 
         from app.tasks.bot_reply import generate_and_send_reply
         generate_and_send_reply.apply(args=["session-id-str"], task_id="my-task-id")
 
         mock_helper.assert_called_once_with("session-id-str", "my-task-id")
-        mock_asyncio.run.assert_called_once_with("coro-sentinel")
+        mock_run.assert_called_once_with("coro-sentinel")
 
 
 def test_generate_and_send_reply_retries_on_exception():
     # Stub the helper too, else the real _generate_and_send(...) coroutine is built
-    # to pass into the mocked asyncio.run and, never awaited, leaks a RuntimeWarning.
-    with patch("app.tasks.bot_reply.asyncio") as mock_asyncio, \
+    # to pass into the mocked run_task_async and, never awaited, leaks a RuntimeWarning.
+    with patch("app.tasks.bot_reply.run_task_async") as mock_run, \
          patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")):
-        mock_asyncio.run.side_effect = Exception("LLM unavailable")
+        mock_run.side_effect = Exception("LLM unavailable")
 
         from app.tasks.bot_reply import generate_and_send_reply
         from celery.exceptions import Retry

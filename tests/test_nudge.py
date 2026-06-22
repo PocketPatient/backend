@@ -243,12 +243,12 @@ async def test_one_session_failing_does_not_abort_the_rest(nudge_setup, db_sessi
 
 def test_check_and_send_nudges_invokes_run_check():
     mock_run = MagicMock(return_value="coro-sentinel")
-    with patch("app.tasks.nudge.asyncio") as mock_asyncio, \
+    with patch("app.tasks.nudge.run_task_async") as mock_rta, \
          patch("app.tasks.nudge._run_nudge_check", mock_run):
-        mock_asyncio.run.return_value = None
+        mock_rta.return_value = None
 
         from app.tasks.nudge import check_and_send_nudges
         check_and_send_nudges.apply()
 
         mock_run.assert_called_once_with()
-        mock_asyncio.run.assert_called_once_with("coro-sentinel")
+        mock_rta.assert_called_once_with("coro-sentinel")
