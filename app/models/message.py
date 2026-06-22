@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from enum import Enum as PyEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Index, Integer, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,6 +18,9 @@ class MessageRole(str, PyEnum):
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = (
+        Index("ix_messages_session_id_sent_at", "session_id", "sent_at"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
