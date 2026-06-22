@@ -8,6 +8,7 @@ from app.config import settings
 celery = Celery(
     "pocket_patient",
     broker=settings.redis_url,
+    task_cls="app.tasks.base:LoggingTask",
     include=[
         "app.tasks.bot_reply",
         "app.tasks.nudge",
