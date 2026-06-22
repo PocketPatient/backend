@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
+import time
 
 from fastapi import HTTPException
 from google import genai
 from google.genai import errors as genai_errors
+
+logger = logging.getLogger(__name__)
 from google.genai.types import GenerateContentConfig, ThinkingConfig
 from pydantic import BaseModel as _PydBaseModel
 
@@ -60,12 +64,35 @@ class LLMGateway:
         )
 
     async def _generate_content(self, **kwargs):
-        try:
-            return await asyncio.to_thread(self.client.models.generate_content, **kwargs)
-        except genai_errors.APIError as exc:
-            raise HTTPException(
-                status_code=502, detail=f"LLM provider error: {exc.message or exc.status}"
-            ) from exc
+        # Up to 3 retries with exponential backoff (1s, 2s, 4s) before each retry;
+        # then surface a 502 just as before.
+        delays = (1, 2, 4)
+        attempt = 0
+        while True:
+            try:
+                start = time.perf_counter()
+                response = await asyncio.to_thread(
+                    self.client.models.generate_content, **kwargs
+                )
+                logger.info(json.dumps({
+                    "event": "llm_latency",
+                    "model": kwargs.get("model", self.model),
+                    "llm_latency_ms": round((time.perf_counter() - start) * 1000, 2),
+                }))
+                return response
+            except genai_errors.APIError as exc:
+                if attempt >= len(delays):
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"LLM provider error: {exc.message or exc.status}",
+                    ) from exc
+                logger.warning(json.dumps({
+                    "event": "llm_retry",
+                    "attempt": attempt + 1,
+                    "error": exc.message or str(exc.status),
+                }))
+                await asyncio.sleep(delays[attempt])
+                attempt += 1
 
     def _build_system_prompt(self, disease: Disease, patient_name: str, patient_age: int) -> str:
         symptoms = ", ".join(disease.key_symptoms) if disease.key_symptoms else "various symptoms"

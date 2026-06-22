@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+import json
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
+from google.genai import errors as genai_errors
 
 
 def _make_disease(
@@ -448,3 +451,72 @@ async def test_generate_nudge_message_empty_response_raises_502(mock_genai):
     with pytest.raises(HTTPException) as exc_info:
         await gw.generate_nudge_message(disease, "Sarah", 34, 6)
     assert exc_info.value.status_code == 502
+
+
+def _api_error():
+    # genai APIError needs a response_json; build a minimal one.
+    return genai_errors.APIError(503, {"error": {"message": "unavailable"}})
+
+
+async def test_generate_content_retries_then_succeeds(monkeypatch):
+    from app.services.llm_gateway import LLMGateway
+
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.client = MagicMock()
+    gw.model = "gemini-2.5-flash"
+
+    calls = {"n": 0}
+
+    def _call(**kwargs):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _api_error()
+        return MagicMock(text="ok")
+
+    gw.client.models.generate_content = _call
+    sleeps: list[float] = []
+
+    async def _fake_sleep(d):
+        sleeps.append(d)
+
+    monkeypatch.setattr("app.services.llm_gateway.asyncio.sleep", _fake_sleep)
+
+    resp = await gw._generate_content(model=gw.model, contents=[], config=None)
+    assert resp.text == "ok"
+    assert sleeps == [1, 2]  # slept before retry #1 and #2; #3 succeeded
+
+
+async def test_generate_content_raises_502_after_exhausting_retries(monkeypatch):
+    from app.services.llm_gateway import LLMGateway
+
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.client = MagicMock()
+    gw.model = "gemini-2.5-flash"
+    gw.client.models.generate_content = MagicMock(side_effect=_api_error())
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(d):
+        sleeps.append(d)
+
+    monkeypatch.setattr("app.services.llm_gateway.asyncio.sleep", _fake_sleep)
+
+    with pytest.raises(HTTPException) as exc:
+        await gw._generate_content(model=gw.model, contents=[], config=None)
+    assert exc.value.status_code == 502
+    assert sleeps == [1, 2, 4]  # slept before each of 3 retries, then gave up
+
+
+async def test_generate_content_logs_latency_on_success(monkeypatch):
+    from app.services.llm_gateway import LLMGateway
+
+    gw = LLMGateway.__new__(LLMGateway)
+    gw.client = MagicMock()
+    gw.model = "gemini-2.5-flash"
+    gw.client.models.generate_content = MagicMock(return_value=MagicMock(text="ok"))
+
+    with patch("app.services.llm_gateway.logger") as mock_log:
+        await gw._generate_content(model=gw.model, contents=[], config=None)
+
+    logged = [json.loads(c.args[0]) for c in mock_log.info.call_args_list]
+    assert any(e["event"] == "llm_latency" and "llm_latency_ms" in e for e in logged)
