@@ -5,11 +5,11 @@ from datetime import datetime, time, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.course import Course
+from app.models.score import Score
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
 from app.models.message import Message, MessageRole
@@ -175,6 +175,7 @@ async def test_full_case_lifecycle(e2e_harness, professor, student, db_session, 
     )).scalars().all()
     assert len(patient_turns) >= 3  # opening + 2 replies
     assert sess.pending_reply_task_id is None  # cleared after each reply
+    assert sess.turn_count >= 2  # turn_count starts at 0; 2 eager bot replies each increment it by 1
 
     # 5. Wrong diagnosis → hint, session stays active.
     r = await client.post(
@@ -199,6 +200,10 @@ async def test_full_case_lifecycle(e2e_harness, professor, student, db_session, 
     assert body["score"] is not None and body["reveal"]["disease_name"] == disease.name
     await db_session.refresh(sess)
     assert sess.status == SessionStatus.diagnosed
+    score_row = (await db_session.execute(
+        select(Score).where(Score.session_id == sess.id)
+    )).scalar_one_or_none()
+    assert score_row is not None and score_row.is_correct is True
 
     # 7. Next case auto-initiates: student now has no active session.
     active = (await db_session.execute(
