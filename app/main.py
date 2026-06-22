@@ -9,11 +9,15 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
+from app.database import engine
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
+from app.observability import register_slow_query_logging
 from app.routers import auth, courses, disease_documents, enrollments, sessions, units, users
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+register_slow_query_logging(engine.sync_engine)
 
 
 @asynccontextmanager
