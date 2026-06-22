@@ -190,10 +190,11 @@ def test_generate_and_send_reply_invokes_helper_with_session_and_task_id():
 
 
 def test_generate_and_send_reply_retries_on_exception():
-    # Stub the helper too, else the real _generate_and_send(...) coroutine is built
-    # to pass into the mocked run_task_async and, never awaited, leaks a RuntimeWarning.
+    # Stub helpers too — else their coroutines are built, passed to the mocked
+    # run_task_async (which raises immediately), never awaited, and leak RuntimeWarnings.
     with patch("app.tasks.bot_reply.run_task_async") as mock_run, \
-         patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")):
+         patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")), \
+         patch("app.tasks.bot_reply._session_user_id", MagicMock(return_value="uid-sentinel")):
         mock_run.side_effect = Exception("LLM unavailable")
 
         from app.tasks.bot_reply import generate_and_send_reply
@@ -201,6 +202,45 @@ def test_generate_and_send_reply_retries_on_exception():
 
         with pytest.raises(Retry):
             generate_and_send_reply.apply(args=["session-id-str"], throw=True)
+
+
+def test_generate_and_send_reply_pushes_once_on_first_failure():
+    # run_task_async raises on the first call (main task), returns a user_id on the second
+    # (the _session_user_id lookup). This mirrors real behaviour where the LLM fails but
+    # the DB lookup succeeds.
+    with patch("app.tasks.bot_reply.run_task_async") as mock_run, \
+         patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")), \
+         patch("app.tasks.bot_reply._session_user_id", MagicMock(return_value="uid-sentinel")), \
+         patch("app.tasks.bot_reply.send_push") as mock_push:
+        mock_run.side_effect = [Exception("LLM unavailable"), "user-id-str"]
+
+        from app.tasks.bot_reply import generate_and_send_reply
+        from celery.exceptions import Retry
+
+        with pytest.raises(Retry):
+            generate_and_send_reply.apply(args=["session-id-str"], throw=True)
+
+        mock_push.delay.assert_called_once()
+        body = mock_push.delay.call_args.args[2]
+        assert "shortly" in body.lower()
+
+
+def test_generate_and_send_reply_no_push_on_later_retry():
+    with patch("app.tasks.bot_reply.run_task_async") as mock_run, \
+         patch("app.tasks.bot_reply._generate_and_send", MagicMock(return_value="coro-sentinel")), \
+         patch("app.tasks.bot_reply.send_push") as mock_push:
+        mock_run.side_effect = Exception("LLM unavailable")
+
+        from app.tasks.bot_reply import generate_and_send_reply
+        from celery.exceptions import Retry
+
+        # request.retries == 1 simulates the second attempt.
+        with pytest.raises(Retry):
+            generate_and_send_reply.apply(
+                args=["session-id-str"], throw=True, retries=1
+            )
+
+        mock_push.delay.assert_not_called()
 
 
 async def test_generate_and_send_regenerates_on_character_break(br_setup, db_session):
