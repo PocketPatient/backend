@@ -36,12 +36,14 @@
 | Create | `app/tasks/nudge.py` | `check_and_send_nudges` stub |
 | Create | `app/tasks/push_notifications.py` | `send_push` Celery task |
 | Create | `app/services/push_service.py` | Thin `firebase_admin.messaging` wrapper |
+| Create | `app/services/firebase.py` | `init_firebase()` — shared init used by both the FastAPI lifespan and the Celery worker |
 | Modify | `app/models/user.py` | Add `fcm_token: Mapped[str \| None]` |
 | Create | `alembic/versions/*_add_fcm_token_to_users.py` | Migration |
 | Modify | `app/routers/users.py` | `PUT /users/me/fcm-token` |
 | Modify | `app/services/session_service.py` | Dispatch `send_push.delay` after bot reply |
+| Modify | `app/main.py` | Replace inline lifespan Firebase init with `init_firebase()` |
 | Modify | `docker-compose.yml` | Add `celery-worker` and `celery-beat` services |
-| Modify | `pyproject.toml` | Add `celery[redis]` |
+| Modify | `pyproject.toml` | Add `celery>=5.3,<6` (`redis` and `firebase-admin` already pinned) |
 
 ### Data flows
 
@@ -52,11 +54,12 @@ Celery Beat (every 15 min)
     → query: active courses with ≥1 released unit
     → for each course: find enrolled students with no active session
     → if now (in course timezone) is within msg_window_start..msg_window_end
-      → for each eligible student:
+      → for each eligible student (skip if already scheduled this window — see dedup note):
           pick a random datetime in the remaining window today
           → initiate_case.apply_async(args=[user_id, course_id], eta=random_dt)
               → double-check: student still has no active session
-              → asyncio.run(session_service.create_new_session(user_id, course_id, db))
+              → session, _opening = asyncio.run(
+                    session_service.create_new_session(user_id, course_id, db))
               → send_push.delay(user_id, "New patient", "A new patient is reaching out to you",
                                 {"type": "new_case", "session_id": str(session.id)})
 ```
@@ -77,7 +80,10 @@ POST /sessions/{id}/messages
 
 ```python
 from celery import Celery
+from celery.signals import worker_process_init
+
 from app.config import settings
+from app.services.firebase import init_firebase
 
 celery = Celery("pocket_patient", broker=settings.redis_url)
 celery.conf.update(
@@ -94,6 +100,12 @@ celery.conf.update(
         },
     },
 )
+
+
+@worker_process_init.connect
+def _init_firebase(**_kwargs):
+    # Worker processes don't run the FastAPI lifespan, so init Firebase here.
+    init_firebase()
 ```
 
 The `celery` instance is imported by tasks (`from app.celery_app import celery`) and by `docker-compose` entrypoints.
@@ -119,25 +131,67 @@ Migration adds the column with `ALTER TABLE users ADD COLUMN fcm_token VARCHAR(5
 - **Behavior:** set `user.fcm_token = body.fcm_token`, commit, return `UserOut`.
 - **Idempotent:** repeated calls overwrite the stored token (token refresh from the Flutter client re-registers silently).
 - **Errors:** 422 if `fcm_token` is empty string.
+- **Note:** `fcm_token` is intentionally **not** added to `UserOut` — the token is write-only from the API's perspective and shouldn't be echoed back. `GET /users/me` continues to return the existing `UserOut` shape unchanged.
+
+---
+
+## `app/services/firebase.py` — shared init (critical for the worker)
+
+`firebase_admin.initialize_app()` is currently called **only** in the FastAPI `lifespan` (`app/main.py`). Celery workers boot from `app.celery_app` and never import `app.main`, so in the worker process `firebase_admin._apps` is empty and `messaging.send()` raises *"The default Firebase app does not exist."* The init logic must be shared and called from both entrypoints.
+
+```python
+# app/services/firebase.py
+import firebase_admin
+import firebase_admin.credentials
+from app.config import settings
+
+
+def init_firebase() -> None:
+    if firebase_admin._apps:
+        return
+    if settings.firebase_credentials_path:
+        cred = firebase_admin.credentials.Certificate(settings.firebase_credentials_path)
+        firebase_admin.initialize_app(cred)
+    elif settings.firebase_project_id:
+        firebase_admin.initialize_app(options={"projectId": settings.firebase_project_id})
+```
+
+- **FastAPI:** `app/main.py` lifespan calls `init_firebase()` instead of the current inline block.
+- **Celery:** wire it to the `worker_process_init` signal in `app/celery_app.py` so each worker process initializes once at boot:
+
+```python
+from celery.signals import worker_process_init
+from app.services.firebase import init_firebase
+
+@worker_process_init.connect
+def _init_firebase(**_kwargs):
+    init_firebase()
+```
+
+(Beat doesn't send pushes, so it doesn't need Firebase — but initializing harmlessly there is fine.)
 
 ---
 
 ## `app/services/push_service.py`
 
-Thin wrapper; keeps `firebase_admin` import isolated in one place.
+Thin wrapper; keeps `firebase_admin.messaging` import isolated in one place.
 
 ```python
+from firebase_admin import messaging  # submodule is NOT pulled in by `import firebase_admin`
+
+
 def send_push_notification(token: str, title: str, body: str, data: dict[str, str]) -> None:
-    message = firebase_admin.messaging.Message(
+    message = messaging.Message(
         token=token,
-        notification=firebase_admin.messaging.Notification(title=title, body=body),
+        notification=messaging.Notification(title=title, body=body),
         data=data,
     )
-    firebase_admin.messaging.send(message)
+    messaging.send(message)
 ```
 
 - Raises `firebase_admin.exceptions.FirebaseError` on failure — callers decide whether to retry.
 - `data` values must all be strings (FCM requirement); callers are responsible for this.
+- Assumes `init_firebase()` has already run in the calling process (see above).
 
 ---
 
@@ -169,19 +223,22 @@ def send_push(self, user_id: str, title: str, body: str, data: dict[str, str]) -
 4. Compute `now` in the course's timezone using `zoneinfo.ZoneInfo(course.msg_timezone)`.
 5. If `now.time()` is within `[msg_window_start, msg_window_end)`:
    - Compute `window_end_dt` = today's date at `msg_window_end` in course tz, converted to UTC.
-   - For each eligible student, pick a random UTC datetime between `now_utc` and `window_end_dt`.
+   - For each eligible student **not already scheduled this window** (see dedup note), pick a random UTC datetime between `now_utc` and `window_end_dt`.
    - Dispatch `initiate_case.apply_async(args=[str(user_id), str(course_id)], eta=random_dt)`.
 
 ### `initiate_case(user_id: str, course_id: str)` (delayed task)
 
-1. `asyncio.run(_check_and_create(user_id, course_id))`:
+1. `session_id = asyncio.run(_check_and_create(user_id, course_id))`:
    - Open DB session.
    - Re-check: student has no active session (race-condition guard).
-   - If still eligible: call `session_service.create_new_session(uuid(user_id), uuid(course_id), db)`.
-   - Return `session.id`.
+   - If still eligible: `session, _opening = await session_service.create_new_session(uuid(user_id), uuid(course_id), db)` — note `create_new_session` returns a `tuple[Session, Message]`, so unpack it.
+   - Return `session.id` (or `None` if not eligible).
+   - Catch `HTTPException` (raised as `422` when the course has no released disease pool) and `IntegrityError`; log and exit without retrying — these are course-data / race conditions, not transient failures.
 2. If a session was created: `send_push.delay(user_id, "PocketPatient", "A new patient is reaching out to you", {"type": "new_case", "session_id": str(session_id)})`.
 
 **Race-condition note:** the partial-index `uq_one_active_session_per_user_course` on `sessions` enforces uniqueness at the DB level even if two workers fire simultaneously. The re-check is a best-effort fast path; the constraint is the real guard.
+
+**Dedup note (rescheduling storm):** `check_and_initiate_cases` runs every 15 min and schedules `initiate_case` with an `eta` later in the window. Until that eta fires, the student *still* has no active session — so each subsequent beat would re-dispatch another `initiate_case` for the same student, piling up N pending tasks that may fire near-simultaneously. The unique index prevents duplicate *sessions*, but not the wasted/duplicate scheduling. Guard with a per-student-per-day dedup marker (e.g. a Redis `SET key NX EX <seconds-until-window-end>` keyed on `initiate:{course_id}:{user_id}:{yyyy-mm-dd}`); only dispatch when the marker is newly set.
 
 ---
 
@@ -241,8 +298,9 @@ Import is a local import inside the function to avoid circular import between `s
 | Scenario | Behavior |
 |----------|----------|
 | Student has no FCM token | `send_push` skips silently (no token = no device registered) |
+| Firebase not initialized in worker | Prevented by `init_firebase()` on `worker_process_init`; without it `messaging.send` raises "default Firebase app does not exist" |
 | Firebase send fails | `send_push` retries up to 3× with 60s delay; after that, task fails silently (push is best-effort) |
-| `create_new_session` raises (no disease pool) | `initiate_case` logs the exception, does not retry (course data issue, not transient) |
+| `create_new_session` raises `HTTPException(422)` (no released disease pool) | `initiate_case` catches `HTTPException`, logs, does not retry (course data issue, not transient) |
 | Race: two workers fire `initiate_case` for same student | DB unique partial index raises `IntegrityError`; task catches and exits cleanly |
 | Celery worker unreachable at HTTP request time | `send_push.delay()` call itself may raise a connection error; wrap in try/except so it never blows up a student's send-message request |
 
@@ -276,3 +334,6 @@ All Celery tasks are tested by calling the underlying `_check_and_create` / `_ge
 - **Push on patient reply:** Celery task dispatched fire-and-forget; never blocks the HTTP response.
 - **Timezone handling:** Python 3.11 built-in `zoneinfo.ZoneInfo`.
 - **FCM token missing:** silent skip (device not yet registered is not an error).
+- **Firebase init in worker:** shared `init_firebase()` wired to `worker_process_init`; the FastAPI lifespan calls the same helper.
+- **Rescheduling storm:** per-student-per-day Redis dedup marker (`SET … NX EX`) so each student is queued at most once per messaging window.
+- **`create_new_session` return:** returns `tuple[Session, Message]`; the task unpacks `session, _opening`.

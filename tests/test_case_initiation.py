@@ -186,7 +186,7 @@ async def test_check_and_create_returns_none_when_session_exists(
     mock_ss.create_new_session.assert_not_called()
 
 
-# --- check_and_initiate_cases (sync task, mock asyncio.run + Redis) ---
+# --- check_and_initiate_cases (sync task, mock run_task_async + Redis) ---
 
 def test_check_and_initiate_cases_dispatches_for_eligible_students():
     user_id = uuid.uuid4()

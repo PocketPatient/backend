@@ -44,7 +44,7 @@ async def test_get_fcm_token_returns_none_when_unset(student, db_session):
     assert token is None
 
 
-# --- send_push Celery task (sync — patches asyncio.run) ---
+# --- send_push Celery task (sync — patches run_task_async) ---
 
 def test_send_push_skips_when_no_token():
     with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
