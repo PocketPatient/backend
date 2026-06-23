@@ -99,7 +99,7 @@ async def test_pagination(client, student, list_setup):
     assert len(body["items"]) == 1
 
 
-async def test_professor_must_own_course(client, professor, student, db_session, list_setup):
+async def test_professor_must_own_course(client, professor, list_setup):
     # professor fixture owns the course; a different course id they don't own -> 404
     course, _, _ = list_setup
     _, token = professor
@@ -108,6 +108,20 @@ async def test_professor_must_own_course(client, professor, student, db_session,
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 404
+
+
+async def test_student_unfiltered_sees_only_own(client, student, list_setup):
+    course, _, _ = list_setup
+    _, token = student
+    resp = await client.get(
+        f"/api/v1/sessions?course_id={course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # stu owns 3 diagnosed + 1 active = 4; other student's session must be excluded.
+    assert body["total"] == 4
+    assert len(body["items"]) == 4
 
 
 async def test_professor_filters_by_student(client, professor, list_setup):
