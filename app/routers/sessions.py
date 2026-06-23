@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +29,7 @@ from app.schemas.session import (
     SessionCreate,
     SessionOut,
 )
+from app.services.analytics_cache import invalidate, summary_key
 from app.services.analytics_service import list_completed_sessions
 from app.services.grading_service import generate_diagnosis_hint, grade_diagnosis
 from app.services.session_service import (
@@ -211,6 +212,7 @@ async def send_message(
 async def diagnose(
     session_id: uuid.UUID,
     body: DiagnosisCreate,
+    request: Request,
     current_user: User = Depends(require_role("student")),
     db: AsyncSession = Depends(get_db),
 ) -> DiagnosisResult:
@@ -252,6 +254,9 @@ async def diagnose(
     db.add(session)
     await db.commit()
     await db.refresh(score)
+
+    redis = getattr(request.app.state, "redis", None)
+    await invalidate(redis, summary_key(current_user.id, session.course_id))
 
     unit = (
         await db.execute(select(Unit).where(Unit.id == disease.unit_id))
