@@ -37,7 +37,7 @@ async def _clear_fcm_token(user_id: str) -> None:
 
 
 @celery.task(bind=True, max_retries=3, default_retry_delay=60)
-def send_push(self, user_id, title, body, data):
+def send_push(self, user_id: str, title: str, body: str, data: dict[str, str]):
     token = run_task_async(_get_fcm_token(user_id))
     if not token:
         return

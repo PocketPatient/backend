@@ -20,6 +20,8 @@ class LoggingTask(Task):
     (Celery semantics), so this is the Redis-broker equivalent of a dead-letter
     queue: the finally-failed task is logged as a structured error for triage."""
 
+    abstract = True  # this is a base class, not itself a registerable task
+
     def on_failure(self, exc, task_id, args, kwargs, einfo):  # noqa: ANN001
         logger.error(json.dumps({
             "event": "dead-letter",

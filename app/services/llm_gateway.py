@@ -9,13 +9,13 @@ import time
 from fastapi import HTTPException
 from google import genai
 from google.genai import errors as genai_errors
-
-logger = logging.getLogger(__name__)
 from google.genai.types import GenerateContentConfig, ThinkingConfig
 from pydantic import BaseModel as _PydBaseModel
 
 from app.config import settings
 from app.models.disease import Disease
+
+logger = logging.getLogger(__name__)
 
 _PATIENT_NAMES = [
     "Sarah", "Michael", "Jennifer", "James", "Lisa",
