@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,6 +18,7 @@ from app.models.score import Score
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit
 from app.models.user import User, UserRole
+from app.schemas.analytics import PaginatedSessions
 from app.schemas.session import (
     DiagnosisCreate,
     DiagnosisResult,
@@ -28,6 +29,7 @@ from app.schemas.session import (
     SessionCreate,
     SessionOut,
 )
+from app.services.analytics_service import list_completed_sessions
 from app.services.grading_service import generate_diagnosis_hint, grade_diagnosis
 from app.services.session_service import (
     create_new_session,
@@ -103,6 +105,42 @@ async def get_active_session_endpoint(
         raise HTTPException(status_code=404, detail="No active session")
     messages = await get_session_messages(session.id, db)
     return _session_out(session, messages)
+
+
+@router.get("", response_model=PaginatedSessions)
+async def list_sessions(
+    course_id: uuid.UUID,
+    status: SessionStatus | None = None,
+    student_id: uuid.UUID | None = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedSessions:
+    if current_user.role == UserRole.student:
+        user_filter: uuid.UUID | None = current_user.id
+    else:
+        course = (
+            await db.execute(
+                select(Course).where(
+                    Course.id == course_id,
+                    Course.professor_id == current_user.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if course is None:
+            raise HTTPException(status_code=404, detail="Course not found")
+        user_filter = student_id
+
+    items, total = await list_completed_sessions(
+        db,
+        course_id=course_id,
+        user_id=user_filter,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    return PaginatedSessions(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/{session_id}", response_model=SessionOut)

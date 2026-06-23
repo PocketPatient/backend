@@ -12,6 +12,7 @@ from app.models.score import Score
 from app.models.session import Session, SessionStatus
 from app.schemas.analytics import (
     CategoryScore,
+    CompletedSessionItem,
     ResponseTimePoint,
     ScoreByCase,
     StudentSummary,
@@ -172,3 +173,63 @@ async def get_student_summary(
         response_time_trend=response_time_trend,
         weak_categories=weak_categories,
     )
+
+
+async def list_completed_sessions(
+    db: AsyncSession,
+    *,
+    course_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+    status: SessionStatus | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[CompletedSessionItem], int]:
+    filters = [Session.course_id == course_id]
+    if user_id is not None:
+        filters.append(Session.user_id == user_id)
+    if status is not None:
+        filters.append(Session.status == status)
+
+    total = (
+        await db.execute(
+            select(func.count(Session.id)).where(*filters)
+        )
+    ).scalar_one()
+
+    rows = (
+        await db.execute(
+            select(
+                Session.id,
+                Disease.name,
+                Disease.category,
+                Score.total_score,
+                Session.turn_count,
+                Session.started_at,
+                Session.completed_at,
+                Session.avg_response_latency_sec,
+            )
+            .join(Disease, Disease.id == Session.disease_id)
+            .outerjoin(Score, Score.session_id == Session.id)
+            .where(*filters)
+            .order_by(
+                Session.completed_at.desc().nulls_last(), Session.started_at.desc()
+            )
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+    ).all()
+
+    items = [
+        CompletedSessionItem(
+            session_id=r.id,
+            disease_name=r.name,
+            category=r.category,
+            score=r.total_score,
+            turn_count=r.turn_count,
+            started_at=r.started_at,
+            completed_at=r.completed_at,
+            avg_response_latency_sec=r.avg_response_latency_sec,
+        )
+        for r in rows
+    ]
+    return items, total
