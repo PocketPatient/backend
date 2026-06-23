@@ -110,6 +110,10 @@ Three queries scoped to `user_id` + `course_id`:
   fresh and skip caching.
 - Invalidation: in `sessions.diagnose`, after a Score is committed, delete the
   key for that `user_id`+`course_id`.
+- Forward-looking: any future write path that changes a student's summary
+  inputs (e.g. an abandon/reset endpoint that alters `total_cases`) must also
+  invalidate `analytics:summary:{user_id}:{course_id}`, or stale data persists
+  for the full TTL. Today `diagnose` is the only such path.
 
 ### Edge cases
 - No sessions: `total_cases = 0`, `completed_cases = 0`, averages `null`,

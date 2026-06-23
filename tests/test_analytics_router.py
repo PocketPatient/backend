@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -87,3 +89,37 @@ async def test_summary_endpoint_empty(client, student):
     )
     assert resp.status_code == 200
     assert resp.json()["total_cases"] == 0
+
+
+async def test_summary_endpoint_returns_cached(client, student):
+    from app.main import app as fastapi_app
+
+    _, token = student
+    cid = uuid.uuid4()
+    sid = str(uuid.uuid4())
+    cached = {
+        "total_cases": 999,
+        "completed_cases": 7,
+        "avg_score": 88.5,
+        "avg_response_time_sec": 1234.5,
+        "scores_by_case": [
+            {"session_id": sid, "disease_name": "Cached MDD", "category": "Mood",
+             "score": 91, "completed_at": "2026-08-15T12:00:00+00:00"}
+        ],
+        "scores_by_category": {"Mood": {"avg_score": 91, "count": 1}},
+        "response_time_trend": [{"case_number": 1, "avg_latency_sec": 1234.5}],
+        "weak_categories": [],
+    }
+    fastapi_app.state.redis.get = AsyncMock(return_value=json.dumps(cached))
+
+    resp = await client.get(
+        f"/api/v1/analytics/student/summary?course_id={cid}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    # Values come straight from the cached payload, not a DB compute.
+    assert body["total_cases"] == 999
+    assert body["scores_by_case"][0]["session_id"] == sid
+    assert body["scores_by_case"][0]["disease_name"] == "Cached MDD"
+    assert body["scores_by_category"]["Mood"]["count"] == 1

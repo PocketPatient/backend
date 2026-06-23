@@ -92,6 +92,9 @@ async def get_student_summary(
                 func.count(Session.id)
                 .filter(Session.status == SessionStatus.diagnosed)
                 .label("completed"),
+                # avg_score averages diagnosed sessions that have a Score row;
+                # avg_rt averages all diagnosed sessions. They differ only for the
+                # degenerate diagnosed-without-Score case, which diagnose never creates.
                 func.avg(Score.total_score)
                 .filter(Session.status == SessionStatus.diagnosed)
                 .label("avg_score"),
@@ -120,7 +123,9 @@ async def get_student_summary(
             .join(Score, Score.session_id == Session.id)
             .where(*scope, Session.status == SessionStatus.diagnosed)
             .order_by(
-                Session.completed_at.asc().nulls_last(), Session.started_at.asc()
+                Session.completed_at.asc().nulls_last(),
+                Session.started_at.asc(),
+                Session.id.asc(),
             )
         )
     ).all()
@@ -212,7 +217,9 @@ async def list_completed_sessions(
             .outerjoin(Score, Score.session_id == Session.id)
             .where(*filters)
             .order_by(
-                Session.completed_at.desc().nulls_last(), Session.started_at.desc()
+                Session.completed_at.desc().nulls_last(),
+                Session.started_at.desc(),
+                Session.id.desc(),
             )
             .limit(page_size)
             .offset((page - 1) * page_size)
