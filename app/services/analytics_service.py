@@ -91,7 +91,9 @@ async def get_student_summary(
                 func.count(Session.id)
                 .filter(Session.status == SessionStatus.diagnosed)
                 .label("completed"),
-                func.avg(Score.total_score).label("avg_score"),
+                func.avg(Score.total_score)
+                .filter(Session.status == SessionStatus.diagnosed)
+                .label("avg_score"),
                 func.avg(Session.avg_response_latency_sec)
                 .filter(Session.status == SessionStatus.diagnosed)
                 .label("avg_rt"),
@@ -156,9 +158,9 @@ async def get_student_summary(
         r.category: CategoryScore(avg_score=round(r.avg_score, 1), count=r.count)
         for r in cat_rows
     }
-    weak_categories = [
+    weak_categories = sorted(
         r.category for r in cat_rows if r.avg_score < WEAK_CATEGORY_THRESHOLD
-    ]
+    )
 
     return StudentSummary(
         total_cases=counts_row.total,
