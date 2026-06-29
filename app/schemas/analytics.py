@@ -51,3 +51,44 @@ class PaginatedSessions(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class UnitCompletion(BaseModel):
+    unit_label: str
+    total_diseases: int
+    total_cases_started: int
+    total_diagnosed: int
+    avg_score: float | None
+
+
+class ScoreBucket(BaseModel):
+    range: str
+    count: int
+
+
+class CategoryHeatmap(BaseModel):
+    students: list[str]
+    categories: list[str]
+    scores: list[list[float | None]]
+
+
+class FlaggedStudent(BaseModel):
+    email: str
+    avg_score: float
+    completed_cases: int
+
+
+class ClassSummary(BaseModel):
+    enrolled_students: int
+    students_with_active_case: int
+    total_completed_cases: int
+    avg_class_score: float | None
+    completion_by_unit: list[UnitCompletion]
+    score_distribution: list[ScoreBucket]
+    category_heatmap: CategoryHeatmap
+    flagged_students: list[FlaggedStudent]
+
+
+class StudentDrilldown(StudentSummary):
+    sessions: list[CompletedSessionItem]
+    total: int
