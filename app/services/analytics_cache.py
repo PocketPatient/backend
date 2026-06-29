@@ -11,6 +11,10 @@ def summary_key(user_id: uuid.UUID, course_id: uuid.UUID) -> str:
     return f"analytics:summary:{user_id}:{course_id}"
 
 
+def class_summary_key(course_id: uuid.UUID) -> str:
+    return f"analytics:class:{course_id}"
+
+
 async def get_cached_json(redis: Any, key: str) -> dict | None:
     if redis is None:
         return None

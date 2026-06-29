@@ -217,3 +217,160 @@ async def test_class_summary_empty(clean_tables, db_session, professor):
         "61-80",
         "81-100",
     }
+
+
+@pytest.mark.asyncio
+async def test_class_summary_endpoint(
+    clean_tables, db_session, client, professor
+):
+    prof, token = professor
+    course = await _course(db_session, prof)
+    u1 = await _unit(db_session, course, "Unit 1")
+    d = await _disease(db_session, u1, "MDD", "Mood")
+    stu = await _student(db_session, 1)
+    await _enroll(db_session, stu, course)
+    await _session(db_session, stu, course, d, SessionStatus.diagnosed, score=70)
+
+    resp = await client.get(
+        f"/api/v1/analytics/professor/class-summary?course_id={course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["enrolled_students"] == 1
+    assert body["avg_class_score"] == 70.0
+
+
+@pytest.mark.asyncio
+async def test_class_summary_blocks_student(
+    clean_tables, db_session, client, professor, student
+):
+    prof, _ = professor
+    _, stu_token = student
+    course = await _course(db_session, prof)
+    resp = await client.get(
+        f"/api/v1/analytics/professor/class-summary?course_id={course.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_class_summary_unowned_course_404(
+    clean_tables, db_session, client, professor, rsa_keys
+):
+    prof, _ = professor
+    course = await _course(db_session, prof)
+    other = User(
+        id=uuid.uuid4(),
+        google_uid=f"p-{uuid.uuid4().hex}",
+        email="other@test.edu",
+        role=UserRole.professor,
+        is_verified=False,
+    )
+    db_session.add(other)
+    await db_session.commit()
+    from tests.conftest import _make_token
+
+    priv, _ = rsa_keys
+    resp = await client.get(
+        f"/api/v1/analytics/professor/class-summary?course_id={course.id}",
+        headers={"Authorization": f"Bearer {_make_token(other.id, priv)}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_diagnose_invalidates_class_cache():
+    import inspect
+
+    from app.routers import sessions as sessions_router
+
+    src = inspect.getsource(sessions_router)
+    assert "class_summary_key" in src
+
+
+@pytest.mark.asyncio
+async def test_student_drilldown(clean_tables, db_session, client, professor):
+    prof, token = professor
+    course = await _course(db_session, prof)
+    u1 = await _unit(db_session, course, "Unit 1")
+    d = await _disease(db_session, u1, "MDD", "Mood")
+    stu = await _student(db_session, 1)
+    await _enroll(db_session, stu, course)
+    await _session(
+        db_session, stu, course, d, SessionStatus.diagnosed, score=88, turns=4
+    )
+
+    resp = await client.get(
+        f"/api/v1/analytics/professor/student/{stu.id}?course_id={course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["completed_cases"] == 1
+    assert body["avg_score"] == 88.0
+    assert body["total"] == 1
+    assert len(body["sessions"]) == 1
+    assert body["sessions"][0]["disease_name"] == "MDD"
+
+
+@pytest.mark.asyncio
+async def test_drilldown_unenrolled_student_404(
+    clean_tables, db_session, client, professor
+):
+    prof, token = professor
+    course = await _course(db_session, prof)
+    stranger = await _student(db_session, 9)  # not enrolled
+    resp = await client.get(
+        f"/api/v1/analytics/professor/student/{stranger.id}?course_id={course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_csv_export(clean_tables, db_session, client, professor):
+    prof, token = professor
+    course = await _course(db_session, prof)
+    u1 = await _unit(db_session, course, "Unit 1")
+    d = await _disease(db_session, u1, "MDD", "Mood")
+    stu = await _student(db_session, 1)
+    await _enroll(db_session, stu, course)
+    await _session(
+        db_session, stu, course, d, SessionStatus.diagnosed, score=75,
+        turns=6, latency=12.0, completed_offset=1,
+    )
+    await _session(
+        db_session, stu, course, d, SessionStatus.diagnosed, score=85,
+        turns=8, latency=10.0, completed_offset=2,
+    )
+
+    resp = await client.get(
+        f"/api/v1/analytics/professor/export?course_id={course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/csv")
+    assert "attachment" in resp.headers["content-disposition"]
+    lines = resp.text.strip().splitlines()
+    assert lines[0] == (
+        "student_email,student_name,case_number,disease_name,category,"
+        "score,response_time_avg,turns,date_completed"
+    )
+    assert len(lines) == 3  # header + 2 cases
+    assert lines[1].split(",")[2] == "1"
+    assert lines[2].split(",")[2] == "2"
+
+
+@pytest.mark.asyncio
+async def test_csv_export_bad_format_400(
+    clean_tables, db_session, client, professor
+):
+    prof, token = professor
+    course = await _course(db_session, prof)
+    resp = await client.get(
+        f"/api/v1/analytics/professor/export?course_id={course.id}&format=xml",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 400

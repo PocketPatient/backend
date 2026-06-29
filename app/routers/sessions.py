@@ -29,7 +29,7 @@ from app.schemas.session import (
     SessionCreate,
     SessionOut,
 )
-from app.services.analytics_cache import invalidate, summary_key
+from app.services.analytics_cache import class_summary_key, invalidate, summary_key
 from app.services.analytics_service import list_completed_sessions
 from app.services.grading_service import generate_diagnosis_hint, grade_diagnosis
 from app.services.session_service import (
@@ -257,6 +257,7 @@ async def diagnose(
 
     redis = getattr(request.app.state, "redis", None)
     await invalidate(redis, summary_key(current_user.id, session.course_id))
+    await invalidate(redis, class_summary_key(session.course_id))
 
     unit = (
         await db.execute(select(Unit).where(Unit.id == disease.unit_id))
