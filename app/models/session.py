@@ -27,6 +27,10 @@ class Session(Base):
             unique=True,
             postgresql_where=text("status = 'active'"),
         ),
+        # Class-summary aggregations filter heavily on (course_id, status).
+        Index("ix_sessions_course_id_status", "course_id", "status"),
+        # Student summaries scope every query on (user_id, course_id).
+        Index("ix_sessions_user_id_course_id", "user_id", "course_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

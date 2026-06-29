@@ -63,6 +63,23 @@ async def test_summary_endpoint_returns_data(client, student, seeded_course):
     assert body["scores_by_category"]["Mood"]["count"] == 1
 
 
+async def test_summary_endpoint_caches_with_120s_ttl(client, student, seeded_course):
+    from app.main import app as fastapi_app
+
+    _, token = student
+    fastapi_app.state.redis = AsyncMock()
+    fastapi_app.state.redis.get = AsyncMock(return_value=None)  # force compute + set
+
+    resp = await client.get(
+        f"/api/v1/analytics/student/summary?course_id={seeded_course.id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    fastapi_app.state.redis.set.assert_awaited_once()
+    _, kwargs = fastapi_app.state.redis.set.call_args
+    assert kwargs.get("ex") == 120
+
+
 async def test_summary_endpoint_forbidden_for_professor(client, professor, seeded_course):
     _, token = professor
     resp = await client.get(

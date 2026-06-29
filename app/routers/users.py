@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from datetime import time
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -54,3 +55,31 @@ async def register_fcm_token(
     await db.commit()
     await db.refresh(current_user)
     return current_user
+
+
+class NotificationPreferences(BaseModel):
+    push_enabled: bool
+    quiet_hours_start: time | None = None
+    quiet_hours_end: time | None = None
+
+    @model_validator(mode="after")
+    def _quiet_hours_both_or_neither(self) -> "NotificationPreferences":
+        if (self.quiet_hours_start is None) != (self.quiet_hours_end is None):
+            raise ValueError(
+                "quiet_hours_start and quiet_hours_end must be set together"
+            )
+        return self
+
+
+@router.put("/me/notification-preferences", response_model=NotificationPreferences)
+async def set_notification_preferences(
+    body: NotificationPreferences,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> NotificationPreferences:
+    current_user.push_enabled = body.push_enabled
+    current_user.quiet_hours_start = body.quiet_hours_start
+    current_user.quiet_hours_end = body.quiet_hours_end
+    db.add(current_user)
+    await db.commit()
+    return body

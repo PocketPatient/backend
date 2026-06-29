@@ -5,6 +5,10 @@ import uuid
 from typing import Any
 
 SUMMARY_TTL_SEC = 300
+# Individual student summaries change more often (every diagnose), so they get a
+# shorter TTL than the class-wide rollup.
+STUDENT_SUMMARY_TTL_SEC = 120
+CLASS_SUMMARY_TTL_SEC = 300
 
 
 def summary_key(user_id: uuid.UUID, course_id: uuid.UUID) -> str:

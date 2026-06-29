@@ -15,6 +15,8 @@ from app.models.enrollment import Enrollment
 from app.models.user import User
 from app.schemas.analytics import ClassSummary, StudentDrilldown, StudentSummary
 from app.services.analytics_cache import (
+    CLASS_SUMMARY_TTL_SEC,
+    STUDENT_SUMMARY_TTL_SEC,
     class_summary_key,
     get_cached_json,
     set_cached_json,
@@ -60,7 +62,9 @@ async def student_summary(
         return StudentSummary.model_validate(cached)
 
     summary = await get_student_summary(current_user.id, course_id, db)
-    await set_cached_json(redis, key, summary.model_dump(mode="json"))
+    await set_cached_json(
+        redis, key, summary.model_dump(mode="json"), ttl=STUDENT_SUMMARY_TTL_SEC
+    )
     return summary
 
 
@@ -83,7 +87,9 @@ async def professor_class_summary(
             return ClassSummary.model_validate(cached)
     summary = await get_class_summary(course_id, db, bottom_pct)
     if use_cache:
-        await set_cached_json(redis, key, summary.model_dump(mode="json"))
+        await set_cached_json(
+            redis, key, summary.model_dump(mode="json"), ttl=CLASS_SUMMARY_TTL_SEC
+        )
     return summary
 
 
@@ -116,7 +122,9 @@ async def professor_student_drilldown(
         summary = StudentSummary.model_validate(cached)
     else:
         summary = await get_student_summary(user_id, course_id, db)
-        await set_cached_json(redis, key, summary.model_dump(mode="json"))
+        await set_cached_json(
+            redis, key, summary.model_dump(mode="json"), ttl=STUDENT_SUMMARY_TTL_SEC
+        )
 
     items, total = await list_completed_sessions(
         db, course_id=course_id, user_id=user_id, page=page, page_size=page_size

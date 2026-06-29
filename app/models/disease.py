@@ -4,7 +4,16 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +24,8 @@ class Disease(Base):
     __tablename__ = "diseases"
     __table_args__ = (
         CheckConstraint("difficulty_tier >= 1 AND difficulty_tier <= 5", name="ck_difficulty_tier_range"),
+        # completion_by_unit joins sessions->diseases and groups by unit_id.
+        Index("ix_diseases_unit_id", "unit_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)

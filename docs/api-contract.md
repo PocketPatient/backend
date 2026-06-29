@@ -30,6 +30,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | GET | `/api/v1/users/me` | Get current user profile | Bearer JWT | ✅ Week 2 |
 | PUT | `/api/v1/users/me/role` | Set role (once only) | Bearer JWT | ✅ Week 2 |
 | PUT | `/api/v1/users/me/fcm-token` | Store or replace FCM push token | Bearer JWT | ✅ Week 9 |
+| PUT | `/api/v1/users/me/notification-preferences` | Set push on/off + quiet hours | Bearer JWT | ✅ Week 15 |
 
 ### GET /api/v1/users/me
 **Response:** `UserOut` — id, google_uid, email, role, is_verified, display_name, created_at  
@@ -47,6 +48,16 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 **Response (200):** `UserOut` (same shape as `GET /users/me`)  
 **Errors:** 401 unauthenticated, 422 `fcm_token` is empty or missing  
 **Notes:** The `fcm_token` field is write-only — it is NOT included in `UserOut`. This endpoint is idempotent; calling it again replaces the stored token.
+
+### PUT /api/v1/users/me/notification-preferences
+**Auth:** any authenticated user  
+**Request:** `{"push_enabled": true, "quiet_hours_start": "22:00", "quiet_hours_end": "08:00"}`  
+- `push_enabled` (bool, required)
+- `quiet_hours_start` / `quiet_hours_end` (`HH:MM`, optional) — must be sent **both or neither**. A window where start > end wraps past midnight. Times are interpreted as UTC.
+
+**Response (200):** the saved preferences (times serialized as `HH:MM:SS`, `null` when no quiet window).  
+**Errors:** 401 unauthenticated, 422 only one of start/end provided  
+**Behavior:** When a push is raised, `send_push` drops it if `push_enabled` is false; if the current time is inside the quiet window it re-enqueues the push with an ETA at the window's close (delivered when quiet hours end) rather than dropping it.
 
 ---
 

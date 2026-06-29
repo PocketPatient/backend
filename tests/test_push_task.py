@@ -7,29 +7,36 @@ import pytest
 pytestmark = pytest.mark.usefixtures("clean_tables")
 
 
-# --- _get_fcm_token async helper ---
+def _state(token="device-token-xyz", push_enabled=True, qs=None, qe=None):
+    from app.tasks.push_notifications import _PushState
 
-async def test_get_fcm_token_returns_token_when_set(student, db_session):
-    from app.tasks.push_notifications import _get_fcm_token
+    return _PushState(token, push_enabled, qs, qe)
+
+
+# --- _get_push_state async helper ---
+
+async def test_get_push_state_returns_token_and_prefs(student, db_session):
+    from app.tasks.push_notifications import _get_push_state
 
     stu, _ = student
     stu.fcm_token = "real-device-token"
     db_session.add(stu)
     await db_session.commit()
 
-    # Patch AsyncSessionLocal inside the task module to use the test session.
     ctx = MagicMock()
     ctx.__aenter__ = AsyncMock(return_value=db_session)
     ctx.__aexit__ = AsyncMock(return_value=False)
 
     with patch("app.tasks.push_notifications.AsyncSessionLocal", return_value=ctx):
-        token = await _get_fcm_token(str(stu.id))
+        state = await _get_push_state(str(stu.id))
 
-    assert token == "real-device-token"
+    assert state.token == "real-device-token"
+    assert state.push_enabled is True
+    assert state.quiet_hours_start is None
 
 
-async def test_get_fcm_token_returns_none_when_unset(student, db_session):
-    from app.tasks.push_notifications import _get_fcm_token
+async def test_get_push_state_returns_none_token_when_unset(student, db_session):
+    from app.tasks.push_notifications import _get_push_state
 
     stu, _ = student
     # fcm_token is None by default
@@ -39,18 +46,17 @@ async def test_get_fcm_token_returns_none_when_unset(student, db_session):
     ctx.__aexit__ = AsyncMock(return_value=False)
 
     with patch("app.tasks.push_notifications.AsyncSessionLocal", return_value=ctx):
-        token = await _get_fcm_token(str(stu.id))
+        state = await _get_push_state(str(stu.id))
 
-    assert token is None
+    assert state.token is None
 
 
 # --- send_push Celery task (sync — patches run_task_async) ---
 
 def test_send_push_skips_when_no_token():
     with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
-         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_run.return_value = None  # no token
+        mock_run.return_value = _state(token=None)
 
         from app.tasks.push_notifications import send_push
 
@@ -61,9 +67,8 @@ def test_send_push_skips_when_no_token():
 
 def test_send_push_calls_push_service_with_token():
     with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
-         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_run.return_value = "device-token-xyz"
+        mock_run.return_value = _state(token="device-token-xyz")
 
         from app.tasks.push_notifications import send_push
 
@@ -79,9 +84,8 @@ def test_send_push_calls_push_service_with_token():
 
 def test_send_push_retries_on_exception():
     with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
-         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps:
-        mock_run.return_value = "token"
+        mock_run.return_value = _state(token="token")
         mock_ps.send_push_notification.side_effect = Exception("FCM unavailable")
 
         from app.tasks.push_notifications import send_push
@@ -96,12 +100,11 @@ def test_send_push_clears_token_and_does_not_retry_on_unregistered():
     from firebase_admin import messaging
 
     with patch("app.tasks.push_notifications.run_task_async") as mock_run, \
-         patch("app.tasks.push_notifications._get_fcm_token", MagicMock(return_value="coro-sentinel")), \
          patch("app.tasks.push_notifications.push_service") as mock_ps, \
          patch("app.tasks.push_notifications._clear_fcm_token",
                MagicMock(return_value="clear-coro")):
-        # 1st run_task_async -> token lookup; 2nd -> clear-token coroutine.
-        mock_run.side_effect = ["device-token", None]
+        # 1st run_task_async -> push state; 2nd -> clear-token coroutine.
+        mock_run.side_effect = [_state(token="device-token"), None]
         mock_ps.send_push_notification.side_effect = messaging.UnregisteredError("gone")
 
         from app.tasks.push_notifications import _clear_fcm_token, send_push
