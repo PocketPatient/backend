@@ -237,6 +237,49 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 `ScoreOut` = primary_dx, differentials, justification, is_correct, rubric_score, response_time_score, total_score, feedback_text, graded_at.  
 **Note:** `GET /api/v1/sessions/{id}` now includes `score` (ScoreOut) and `reveal` (disease_name, dsm_code, unit_label) for `diagnosed` sessions, and `null` for both while `active`.
 
+### GET /api/v1/sessions
+**Role required:** student or professor  
+**Query:** `course_id` (required), `status` (optional `SessionStatus`), `student_id` (optional, professor only), `page` (default 1), `page_size` (default 20, max 100)  
+**Response (200):** `{ "items": [CompletedSessionItem], "total": N, "page": p, "page_size": s }`. Students see only their own sessions; professors must own the course (else 404) and may filter by `student_id`. Ordered by `completed_at` desc (nulls last). `CompletedSessionItem` = session_id, disease_name, category, score (nullable), turn_count, started_at, completed_at, avg_response_latency_sec.
+
+---
+
+## Analytics
+
+| Method | Path | Description | Role | Status |
+|--------|------|-------------|------|--------|
+| GET | `/api/v1/analytics/student/summary?course_id={id}` | Student's own scores, trends, weak categories | student | ✅ Week 13 |
+| GET | `/api/v1/analytics/professor/class-summary?course_id={id}` | Class overview stats | professor | ✅ Week 14 |
+| GET | `/api/v1/analytics/professor/student/{user_id}?course_id={id}` | Per-student drill-down | professor | ✅ Week 14 |
+| GET | `/api/v1/analytics/professor/export?course_id={id}` | CSV grade export | professor | ✅ Week 14 |
+
+### GET /api/v1/analytics/student/summary
+**Role required:** student  
+**Query:** `course_id` (required)  
+**Response (200):** `StudentSummary` = total_cases, completed_cases, avg_score (nullable), avg_response_time_sec (nullable), scores_by_case[], scores_by_category{}, response_time_trend[], weak_categories[] (avg category score < 60). Redis-cached 300s; invalidated on new score.
+
+### GET /api/v1/analytics/professor/class-summary
+**Role required:** professor (must own course, else 404)  
+**Query:** `course_id` (required), `bottom_pct` (optional, default `0.2`, `0 < pct ≤ 1`) — fraction flagged as bottom performers  
+**Response (200):** `ClassSummary`:
+- `enrolled_students`, `students_with_active_case`, `total_completed_cases`, `avg_class_score` (nullable)
+- `completion_by_unit[]` — `{unit_label, total_diseases, total_cases_started, total_diagnosed, avg_score}` per unit
+- `score_distribution[]` — per completed case, 5 buckets `0-20 / 21-40 / 41-60 / 61-80 / 81-100`
+- `category_heatmap` — `{students[] (emails, ≥1 completed case), categories[], scores[][] (avg or null)}`
+- `flagged_students[]` — bottom `bottom_pct` by avg score: `{email, avg_score, completed_cases}`, worst first
+
+Redis-cached 300s (default `bottom_pct` only); invalidated on new score.
+
+### GET /api/v1/analytics/professor/student/{user_id}
+**Role required:** professor (must own course, else 404; student must be enrolled, else 404)  
+**Query:** `course_id` (required), `page` (default 1), `page_size` (default 100, max 100)  
+**Response (200):** `StudentDrilldown` = all `StudentSummary` fields **+** `sessions[]` (`CompletedSessionItem`, any status) **+** `total`. Each session's `session_id` links to `GET /api/v1/sessions/{session_id}` for the transcript.
+
+### GET /api/v1/analytics/professor/export
+**Role required:** professor (must own course, else 404)  
+**Query:** `course_id` (required), `format` (default `csv`; any other value → 400)  
+**Response (200):** `text/csv` with `Content-Disposition: attachment; filename="grades_{course_id}.csv"`. One row per diagnosed case across all students, ordered by `student_email` then per-student completion. Columns: `student_email, student_name, case_number, disease_name, category, score, response_time_avg, turns, date_completed` (`case_number` = per-student 1-based ordinal by completion).
+
 ---
 
 ## Health

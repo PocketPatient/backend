@@ -11,7 +11,7 @@ from app.models.course import Course
 from app.models.disease import Disease
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
-from app.services.analytics_cache import summary_key
+from app.services.analytics_cache import class_summary_key, summary_key
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
 
@@ -67,4 +67,5 @@ async def test_diagnose_invalidates_summary_cache(client, student, diagnose_setu
     )
     assert resp.status_code == 200
     assert resp.json()["correct"] is True
-    redis.delete.assert_awaited_with(summary_key(stu.id, course.id))
+    redis.delete.assert_any_await(summary_key(stu.id, course.id))
+    redis.delete.assert_any_await(class_summary_key(course.id))
