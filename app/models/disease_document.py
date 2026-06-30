@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -11,7 +11,10 @@ from app.database import Base
 
 class DiseaseDocument(Base):
     __tablename__ = "disease_documents"
-    __table_args__ = (UniqueConstraint("course_id", "version"),)
+    __table_args__ = (
+        UniqueConstraint("course_id", "version"),
+        Index("ix_disease_documents_uploaded_by", "uploaded_by"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     course_id: Mapped[uuid.UUID] = mapped_column(

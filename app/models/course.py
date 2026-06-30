@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, time
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Time, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Time, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -11,6 +11,9 @@ from app.database import Base
 
 class Course(Base):
     __tablename__ = "courses"
+    __table_args__ = (
+        Index("ix_courses_professor_id", "professor_id"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
