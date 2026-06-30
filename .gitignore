@@ -23,3 +23,6 @@ alembic/versions/*.pyc
 
 # OS
 .DS_Store
+
+# Archive output
+archives/
