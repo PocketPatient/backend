@@ -50,17 +50,40 @@ class RevealOut(BaseModel):
 
 
 class SessionOut(BaseModel):
-    id: uuid.UUID
-    disease_id: uuid.UUID
-    course_id: uuid.UUID
-    status: SessionStatus
-    turn_count: int
-    started_at: datetime
+    id: uuid.UUID = Field(description="Unique session identifier.")
+    disease_id: uuid.UUID = Field(description="ID of the disease case assigned to this session.")
+    course_id: uuid.UUID = Field(description="ID of the course this session belongs to.")
+    status: SessionStatus = Field(description="Current session status: active, diagnosed, or abandoned.")
+    turn_count: int = Field(description="Number of message turns exchanged so far.")
+    started_at: datetime = Field(description="ISO-8601 timestamp when the session was started.")
     messages: list[MessageOut]
     score: ScoreOut | None = None
     reveal: RevealOut | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "example": {
+                "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "disease_id": "4cb96e75-6828-5673-c4gd-3d074g77bgb7",
+                "course_id": "5dc07f86-7939-6784-d5he-4e185h88chc8",
+                "status": "active",
+                "turn_count": 4,
+                "started_at": "2026-09-15T09:00:00Z",
+                "messages": [
+                    {
+                        "id": "6ed18g97-8a4a-7895-e6if-5f296i99didi9",
+                        "role": "student",
+                        "content": "Hello, how are you feeling today?",
+                        "sent_at": "2026-09-15T09:00:05Z",
+                        "response_latency_sec": None,
+                    }
+                ],
+                "score": None,
+                "reveal": None,
+            }
+        },
+    }
 
 
 class DiagnosisCreate(BaseModel):

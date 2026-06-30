@@ -54,3 +54,24 @@ def test_protected_routes_declare_401():
         if (path, method) not in public and "401" not in op.get("responses", {})
     ]
     assert not missing, f"protected routes missing 401 response: {missing}"
+
+
+# Core response models that must carry a description and an example.
+_CORE_SCHEMAS = [
+    "CourseOut",
+    "UserOut",
+    "SessionOut",
+    "TokenResponse",
+    "StudentSummary",
+    "ClassSummary",
+    "NotificationPreferences",
+]
+
+
+@pytest.mark.parametrize("name", _CORE_SCHEMAS)
+def test_core_schema_has_example(name):
+    schemas = _schema()["components"]["schemas"]
+    assert name in schemas, f"{name} not in OpenAPI components"
+    assert schemas[name].get("example") or schemas[name].get("examples"), (
+        f"{name} must declare an example"
+    )

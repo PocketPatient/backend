@@ -51,14 +51,31 @@ class CourseUpdate(BaseModel):
 class CourseOut(BaseModel):
     id: uuid.UUID
     title: str
-    professor_id: uuid.UUID
-    class_code: str
+    professor_id: uuid.UUID = Field(description="ID of the professor who owns the course.")
+    class_code: str = Field(description="6-char uppercase join code (no 0/O/1/I/L).")
     semester: str | None
     is_active: bool
     msg_window_start: time
     msg_window_end: time
     msg_timezone: str
     created_at: datetime
-    student_count: int
+    student_count: int = Field(description="Number of enrolled students (computed).")
 
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "json_schema_extra": {
+            "example": {
+                "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "title": "Intro to Clinical Psychiatry",
+                "professor_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                "class_code": "BRT4K9",
+                "semester": "Fall 2026",
+                "is_active": True,
+                "msg_window_start": "08:00:00",
+                "msg_window_end": "22:00:00",
+                "msg_timezone": "America/New_York",
+                "created_at": "2026-09-01T14:30:00Z",
+                "student_count": 24,
+            }
+        },
+    }

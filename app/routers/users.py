@@ -59,9 +59,19 @@ async def register_fcm_token(
 
 
 class NotificationPreferences(BaseModel):
-    push_enabled: bool
-    quiet_hours_start: time | None = None
-    quiet_hours_end: time | None = None
+    push_enabled: bool = Field(description="Whether push notifications are enabled for the user.")
+    quiet_hours_start: time | None = Field(default=None, description="Local time when quiet hours begin (push suppressed). Must be set together with quiet_hours_end.")
+    quiet_hours_end: time | None = Field(default=None, description="Local time when quiet hours end. Must be set together with quiet_hours_start.")
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "push_enabled": True,
+                "quiet_hours_start": "22:00:00",
+                "quiet_hours_end": "08:00:00",
+            }
+        }
+    }
 
     @model_validator(mode="after")
     def _quiet_hours_both_or_neither(self) -> "NotificationPreferences":
