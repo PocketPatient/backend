@@ -65,14 +65,14 @@ class SessionOut(BaseModel):
         "json_schema_extra": {
             "example": {
                 "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-                "disease_id": "4cb96e75-6828-5673-c4gd-3d074g77bgb7",
-                "course_id": "5dc07f86-7939-6784-d5he-4e185h88chc8",
+                "disease_id": "4cb96e75-6828-4673-a4bd-3d074b77c1b7",
+                "course_id": "5dc07f86-7939-4784-b5ce-4e185c88d2c8",
                 "status": "active",
                 "turn_count": 4,
                 "started_at": "2026-09-15T09:00:00Z",
                 "messages": [
                     {
-                        "id": "6ed18g97-8a4a-7895-e6if-5f296i99didi9",
+                        "id": "6ed18a97-8a4a-4895-c6df-5f296d99e3d9",
                         "role": "student",
                         "content": "Hello, how are you feeling today?",
                         "sent_at": "2026-09-15T09:00:05Z",
