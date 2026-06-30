@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user, require_role
+from app.openapi import errors
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.user import User, UserRole
@@ -57,7 +58,7 @@ def _student_count_subquery():
     )
 
 
-@router.get("", response_model=list[CourseOut])
+@router.get("", response_model=list[CourseOut], summary="List the caller's courses", responses=errors(401, 429))
 async def list_courses(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
@@ -78,7 +79,7 @@ async def list_courses(
     return [_make_course_out(course, count) for course, count in rows]
 
 
-@router.get("/{course_id}", response_model=CourseOut)
+@router.get("/{course_id}", response_model=CourseOut, summary="Get one course", responses=errors(401, 404, 429))
 async def get_course(
     course_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -109,7 +110,7 @@ async def get_course(
     return _make_course_out(course, count)
 
 
-@router.put("/{course_id}", response_model=CourseOut)
+@router.put("/{course_id}", response_model=CourseOut, summary="Update a course", responses=errors(401, 404, 422, 429))
 async def update_course(
     course_id: uuid.UUID,
     body: CourseUpdate,
@@ -132,7 +133,7 @@ async def update_course(
     return _make_course_out(course, count)
 
 
-@router.delete("/{course_id}/deactivate", response_model=CourseOut)
+@router.delete("/{course_id}/deactivate", response_model=CourseOut, summary="Deactivate a course", responses=errors(401, 404, 429))
 async def deactivate_course(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),
@@ -152,7 +153,7 @@ async def deactivate_course(
     return _make_course_out(course, count)
 
 
-@router.post("", status_code=201, response_model=CourseOut)
+@router.post("", status_code=201, response_model=CourseOut, summary="Create a course", responses=errors(401, 422, 429))
 async def create_course(
     body: CourseCreate,
     current_user: User = Depends(require_role("professor")),

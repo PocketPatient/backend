@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.openapi import errors
 from app.services import auth_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -22,7 +23,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, summary="Exchange Google ID token for a JWT", responses=errors(401, 422, 429))
 async def login(
     body: LoginRequest,
     request: Request,
@@ -35,7 +36,7 @@ async def login(
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse, summary="Refresh an access token", responses=errors(401, 422, 429))
 async def refresh(
     body: RefreshRequest,
     request: Request,

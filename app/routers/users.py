@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user
+from app.openapi import errors
 from app.models.user import User, UserRole
 from app.schemas.user import UserOut
 
@@ -19,12 +20,12 @@ class RoleRequest(BaseModel):
     role: Literal["student", "professor"]
 
 
-@router.get("/me", response_model=UserOut)
+@router.get("/me", response_model=UserOut, summary="Get the current user", responses=errors(401, 429))
 async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.put("/me/role", response_model=UserOut)
+@router.put("/me/role", response_model=UserOut, summary="Set the current user's role", responses=errors(401, 422, 429))
 async def set_role(
     body: RoleRequest,
     current_user: User = Depends(get_current_user),
@@ -44,7 +45,7 @@ class FcmTokenRequest(BaseModel):
     fcm_token: str = Field(min_length=1, max_length=512)
 
 
-@router.put("/me/fcm-token", response_model=UserOut)
+@router.put("/me/fcm-token", response_model=UserOut, summary="Update the FCM push token", responses=errors(401, 422, 429))
 async def register_fcm_token(
     body: FcmTokenRequest,
     current_user: User = Depends(get_current_user),
@@ -71,7 +72,7 @@ class NotificationPreferences(BaseModel):
         return self
 
 
-@router.put("/me/notification-preferences", response_model=NotificationPreferences)
+@router.put("/me/notification-preferences", response_model=NotificationPreferences, summary="Update notification preferences", responses=errors(401, 422, 429))
 async def set_notification_preferences(
     body: NotificationPreferences,
     current_user: User = Depends(get_current_user),

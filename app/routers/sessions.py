@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.celery_app import celery
 from app.database import get_db
 from app.deps import get_current_user, require_role
+from app.openapi import errors
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
@@ -95,7 +96,7 @@ async def _load_reveal(
     return score_out, reveal
 
 
-@router.get("/active", response_model=SessionOut)
+@router.get("/active", response_model=SessionOut, summary="Get the caller's active session", responses=errors(401, 404, 429))
 async def get_active_session_endpoint(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("student")),
@@ -108,7 +109,7 @@ async def get_active_session_endpoint(
     return _session_out(session, messages)
 
 
-@router.get("", response_model=PaginatedSessions)
+@router.get("", response_model=PaginatedSessions, summary="List the caller's sessions (paginated)", responses=errors(401, 429))
 async def list_sessions(
     course_id: uuid.UUID,
     status: SessionStatus | None = None,
@@ -144,7 +145,7 @@ async def list_sessions(
     return PaginatedSessions(items=items, total=total, page=page, page_size=page_size)
 
 
-@router.get("/{session_id}", response_model=SessionOut)
+@router.get("/{session_id}", response_model=SessionOut, summary="Get one session", responses=errors(401, 404, 429))
 async def get_session(
     session_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -177,7 +178,7 @@ async def get_session(
     return _session_out(session, messages, score_out, reveal)
 
 
-@router.post("/{session_id}/messages", response_model=MessageOut, status_code=202)
+@router.post("/{session_id}/messages", response_model=MessageOut, status_code=202, summary="Send a message to the patient", responses=errors(401, 404, 422, 429))
 async def send_message(
     session_id: uuid.UUID,
     body: MessageCreate,
@@ -208,7 +209,7 @@ async def send_message(
     )
 
 
-@router.post("/{session_id}/diagnose", response_model=DiagnosisResult)
+@router.post("/{session_id}/diagnose", response_model=DiagnosisResult, summary="Submit a diagnosis", responses=errors(401, 404, 422, 429))
 async def diagnose(
     session_id: uuid.UUID,
     body: DiagnosisCreate,
@@ -273,7 +274,7 @@ async def diagnose(
     )
 
 
-@router.post("", response_model=SessionOut, status_code=201)
+@router.post("", response_model=SessionOut, status_code=201, summary="Start a new session", responses=errors(401, 404, 422, 429))
 async def create_session(
     body: SessionCreate,
     current_user: User = Depends(require_role("student")),

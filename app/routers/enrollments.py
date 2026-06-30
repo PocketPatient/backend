@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user, require_role
+from app.openapi import errors
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.user import User
@@ -18,7 +19,7 @@ from app.schemas.enrollment import EnrolledStudentOut, EnrollmentJoinRequest
 router = APIRouter(tags=["enrollments"])
 
 
-@router.post("/enrollments/join", response_model=CourseOut)
+@router.post("/enrollments/join", response_model=CourseOut, summary="Join a course by class code", responses=errors(401, 404, 422, 429))
 async def join_course(
     body: EnrollmentJoinRequest,
     current_user: User = Depends(require_role("student")),
@@ -53,7 +54,7 @@ async def join_course(
     return _make_course_out(course, count)
 
 
-@router.get("/courses/{course_id}/students", response_model=list[EnrolledStudentOut])
+@router.get("/courses/{course_id}/students", response_model=list[EnrolledStudentOut], summary="List enrolled students", responses=errors(401, 404, 429))
 async def list_students(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),
@@ -84,7 +85,7 @@ async def list_students(
     ]
 
 
-@router.delete("/courses/{course_id}/students/{user_id}", status_code=204)
+@router.delete("/courses/{course_id}/students/{user_id}", status_code=204, summary="Unenroll a student", responses=errors(401, 404, 429))
 async def remove_student(
     course_id: uuid.UUID,
     user_id: uuid.UUID,

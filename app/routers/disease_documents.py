@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import require_role
+from app.openapi import errors
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.disease_document import DiseaseDocument
@@ -57,7 +58,7 @@ def _extract_extension(filename: str | None) -> str:
     return ext
 
 
-@router.post("", response_model=DiseaseDocumentPreview)
+@router.post("", response_model=DiseaseDocumentPreview, summary="Upload a disease document for preview", responses=errors(401, 404, 422, 429))
 async def upload_disease_document(
     course_id: uuid.UUID,
     file: UploadFile = File(...),
@@ -147,7 +148,7 @@ async def upload_disease_document(
     )
 
 
-@router.post("/confirm", response_model=DiseaseDocumentConfirmResult)
+@router.post("/confirm", response_model=DiseaseDocumentConfirmResult, summary="Confirm a parsed disease document", responses=errors(401, 404, 422, 429))
 async def confirm_disease_document(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),

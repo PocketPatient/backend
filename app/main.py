@@ -99,6 +99,6 @@ app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
 
 
-@app.get("/health")
+@app.get("/health", summary="Health check", tags=["health"])
 async def health():
     return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}

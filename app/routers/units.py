@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.deps import get_current_user, require_role
+from app.openapi import errors
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
@@ -41,7 +42,7 @@ def _make_unit_out(unit: Unit, diseases: list[Disease]) -> UnitOut:
     )
 
 
-@router.get("/units", response_model=None)
+@router.get("/units", response_model=None, summary="List units in a course", responses=errors(401, 404, 429))
 async def list_units(
     course_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -160,7 +161,7 @@ async def _get_owned_unit(
     return unit, list(diseases)
 
 
-@router.put("/units/{unit_id}/release", response_model=UnitOut)
+@router.put("/units/{unit_id}/release", response_model=UnitOut, summary="Release a unit", responses=errors(401, 404, 429))
 async def release_unit(
     course_id: uuid.UUID,
     unit_id: uuid.UUID,
@@ -177,7 +178,7 @@ async def release_unit(
     return result
 
 
-@router.put("/units/{unit_id}/close", response_model=UnitOut)
+@router.put("/units/{unit_id}/close", response_model=UnitOut, summary="Close a unit", responses=errors(401, 404, 429))
 async def close_unit(
     course_id: uuid.UUID,
     unit_id: uuid.UUID,
@@ -193,7 +194,7 @@ async def close_unit(
     return result
 
 
-@router.get("/disease-pool", response_model=list[DiseaseOut])
+@router.get("/disease-pool", response_model=list[DiseaseOut], summary="List the course disease pool", responses=errors(401, 404, 429))
 async def get_disease_pool(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),
