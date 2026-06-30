@@ -13,6 +13,7 @@ from app.database import engine
 from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.observability import register_slow_query_logging
+from app.openapi import TAGS_METADATA
 from app.routers import analytics, auth, courses, disease_documents, enrollments, sessions, units, users
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -29,7 +30,21 @@ async def lifespan(app: FastAPI):
     await app.state.redis.aclose()
 
 
-app = FastAPI(title="PocketPatient API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="PocketPatient API",
+    version="0.1.0",
+    description=(
+        "Backend for PocketPatient, a psychiatry-training app where students "
+        "message AI 'patients' assigned by their professor. Authenticate with a "
+        "Google sign-in, exchange it for an RS256 JWT at `/api/v1/auth/login`, "
+        "and send it as `Authorization: Bearer <token>`. Errors use a standard "
+        "`{detail, code}` envelope. See `docs/api-guide.md` for the full guide."
+    ),
+    openapi_tags=TAGS_METADATA,
+    contact={"name": "PocketPatient Backend"},
+    license_info={"name": "Proprietary"},
+    lifespan=lifespan,
+)
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(RateLimitMiddleware)
 
