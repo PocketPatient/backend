@@ -28,7 +28,7 @@ ERROR_RESPONSES: dict[int, dict] = {
 
 def errors(*codes: int) -> dict[int, dict]:
     """Return the OpenAPI `responses` subset for the given status codes."""
-    return {code: ERROR_RESPONSES[code] for code in codes}
+    return {code: ERROR_RESPONSES[code] for code in codes if code in ERROR_RESPONSES}
 
 
 TAGS_METADATA: list[dict] = [

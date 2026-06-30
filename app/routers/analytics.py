@@ -48,7 +48,7 @@ async def _require_owned_course(
     return course
 
 
-@router.get("/student/summary", response_model=StudentSummary, summary="Student's own analytics summary", responses=errors(401, 429))
+@router.get("/student/summary", response_model=StudentSummary, summary="Student's own analytics summary", responses=errors(401, 403, 429))
 async def student_summary(
     course_id: uuid.UUID,
     request: Request,
@@ -69,7 +69,7 @@ async def student_summary(
     return summary
 
 
-@router.get("/professor/class-summary", response_model=ClassSummary, summary="Class analytics summary", responses=errors(401, 404, 429))
+@router.get("/professor/class-summary", response_model=ClassSummary, summary="Class analytics summary", responses=errors(401, 403, 404, 429))
 async def professor_class_summary(
     course_id: uuid.UUID,
     request: Request,
@@ -94,7 +94,7 @@ async def professor_class_summary(
     return summary
 
 
-@router.get("/professor/student/{user_id}", response_model=StudentDrilldown, summary="Per-student drill-down", responses=errors(401, 404, 429))
+@router.get("/professor/student/{user_id}", response_model=StudentDrilldown, summary="Per-student drill-down", responses=errors(401, 403, 404, 429))
 async def professor_student_drilldown(
     user_id: uuid.UUID,
     course_id: uuid.UUID,
@@ -133,7 +133,7 @@ async def professor_student_drilldown(
     return StudentDrilldown(**summary.model_dump(), sessions=items, total=total)
 
 
-@router.get("/professor/export", summary="Export class analytics as CSV", responses=errors(401, 404, 429))
+@router.get("/professor/export", summary="Export class analytics as CSV", responses=errors(400, 401, 403, 404, 429))
 async def professor_export(
     course_id: uuid.UUID,
     format: str = "csv",

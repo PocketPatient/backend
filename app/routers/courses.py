@@ -110,7 +110,7 @@ async def get_course(
     return _make_course_out(course, count)
 
 
-@router.put("/{course_id}", response_model=CourseOut, summary="Update a course", responses=errors(401, 404, 422, 429))
+@router.put("/{course_id}", response_model=CourseOut, summary="Update a course", responses=errors(401, 403, 404, 422, 429))
 async def update_course(
     course_id: uuid.UUID,
     body: CourseUpdate,
@@ -133,7 +133,7 @@ async def update_course(
     return _make_course_out(course, count)
 
 
-@router.delete("/{course_id}/deactivate", response_model=CourseOut, summary="Deactivate a course", responses=errors(401, 404, 429))
+@router.delete("/{course_id}/deactivate", response_model=CourseOut, summary="Deactivate a course", responses=errors(401, 403, 404, 429))
 async def deactivate_course(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),
@@ -153,7 +153,7 @@ async def deactivate_course(
     return _make_course_out(course, count)
 
 
-@router.post("", status_code=201, response_model=CourseOut, summary="Create a course", responses=errors(401, 422, 429))
+@router.post("", status_code=201, response_model=CourseOut, summary="Create a course", responses=errors(401, 403, 422, 429))
 async def create_course(
     body: CourseCreate,
     current_user: User = Depends(require_role("professor")),

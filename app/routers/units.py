@@ -161,7 +161,7 @@ async def _get_owned_unit(
     return unit, list(diseases)
 
 
-@router.put("/units/{unit_id}/release", response_model=UnitOut, summary="Release a unit", responses=errors(401, 404, 429))
+@router.put("/units/{unit_id}/release", response_model=UnitOut, summary="Release a unit", responses=errors(401, 403, 404, 409, 429))
 async def release_unit(
     course_id: uuid.UUID,
     unit_id: uuid.UUID,
@@ -178,7 +178,7 @@ async def release_unit(
     return result
 
 
-@router.put("/units/{unit_id}/close", response_model=UnitOut, summary="Close a unit", responses=errors(401, 404, 429))
+@router.put("/units/{unit_id}/close", response_model=UnitOut, summary="Close a unit", responses=errors(401, 403, 404, 409, 429))
 async def close_unit(
     course_id: uuid.UUID,
     unit_id: uuid.UUID,
@@ -194,7 +194,7 @@ async def close_unit(
     return result
 
 
-@router.get("/disease-pool", response_model=list[DiseaseOut], summary="List the course disease pool", responses=errors(401, 404, 429))
+@router.get("/disease-pool", response_model=list[DiseaseOut], summary="List the course disease pool", responses=errors(401, 403, 404, 429))
 async def get_disease_pool(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),

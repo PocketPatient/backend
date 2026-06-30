@@ -58,7 +58,7 @@ def _extract_extension(filename: str | None) -> str:
     return ext
 
 
-@router.post("", response_model=DiseaseDocumentPreview, summary="Upload a disease document for preview", responses=errors(401, 404, 422, 429))
+@router.post("", response_model=DiseaseDocumentPreview, summary="Upload a disease document for preview", responses=errors(400, 401, 403, 404, 422, 429))
 async def upload_disease_document(
     course_id: uuid.UUID,
     file: UploadFile = File(...),
@@ -148,7 +148,7 @@ async def upload_disease_document(
     )
 
 
-@router.post("/confirm", response_model=DiseaseDocumentConfirmResult, summary="Confirm a parsed disease document", responses=errors(401, 404, 422, 429))
+@router.post("/confirm", response_model=DiseaseDocumentConfirmResult, summary="Confirm a parsed disease document", responses=errors(400, 401, 403, 404, 422, 429))
 async def confirm_disease_document(
     course_id: uuid.UUID,
     current_user: User = Depends(require_role("professor")),

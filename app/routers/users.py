@@ -25,7 +25,7 @@ async def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.put("/me/role", response_model=UserOut, summary="Set the current user's role", responses=errors(401, 422, 429))
+@router.put("/me/role", response_model=UserOut, summary="Set the current user's role", responses=errors(401, 409, 422, 429))
 async def set_role(
     body: RoleRequest,
     current_user: User = Depends(get_current_user),

@@ -72,7 +72,7 @@ class SessionOut(BaseModel):
                 "started_at": "2026-09-15T09:00:00Z",
                 "messages": [
                     {
-                        "id": "6ed18a97-8a4a-4895-c6df-5f296d99e3d9",
+                        "id": "6ed18a97-8a4a-4895-b6df-5f296d99e3d9",
                         "role": "student",
                         "content": "Hello, how are you feeling today?",
                         "sent_at": "2026-09-15T09:00:05Z",
