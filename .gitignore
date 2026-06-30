@@ -26,3 +26,6 @@ alembic/versions/*.pyc
 
 # Archive output
 archives/
+
+# Backups
+backups/
