@@ -9,6 +9,12 @@ def test_cutoff_for_subtracts_years():
     assert cutoff_for(3, now) == datetime(2023, 6, 29, tzinfo=timezone.utc)
 
 
+def test_cutoff_for_handles_leap_day():
+    # Feb 29 2028 (leap) minus 3 years -> 2025 (non-leap); must clamp to Feb 28.
+    leap_day = datetime(2028, 2, 29, tzinfo=timezone.utc)
+    assert cutoff_for(3, leap_day) == datetime(2025, 2, 28, tzinfo=timezone.utc)
+
+
 async def _make_session(db_session, started_at):
     from app.models.user import User
     from app.models.course import Course

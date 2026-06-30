@@ -31,7 +31,10 @@ ARCHIVE_DIR = Path("archives")
 
 def cutoff_for(years: int, now: datetime | None = None) -> datetime:
     now = now or datetime.now(timezone.utc)
-    return now.replace(year=now.year - years)
+    try:
+        return now.replace(year=now.year - years)
+    except ValueError:  # Feb 29 in a leap year -> Feb 28 in a non-leap target year
+        return now.replace(year=now.year - years, day=28)
 
 
 async def select_old_session_ids(db: AsyncSession, cutoff: datetime) -> list[uuid.UUID]:
