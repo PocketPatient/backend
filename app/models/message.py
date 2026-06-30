@@ -24,7 +24,7 @@ class Message(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     session_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("sessions.id"), nullable=False
+        ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[MessageRole] = mapped_column(
         Enum(MessageRole, name="message_role"), nullable=False

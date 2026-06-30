@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, time
 from enum import Enum as PyEnum
 
-from sqlalchemy import Boolean, DateTime, Enum, String, Time, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, String, Time, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -18,6 +18,12 @@ class UserRole(str, PyEnum):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "(quiet_hours_start IS NULL) = (quiet_hours_end IS NULL)",
+            name="ck_quiet_hours_paired",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     google_uid: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
