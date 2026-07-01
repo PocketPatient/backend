@@ -119,10 +119,12 @@ def test_logout_revokes_all_refresh_tokens(client):
 
     assert resp.status_code == 204
     redis.smembers.assert_awaited_once_with(f"refresh_user:{user.id}")
-    delete_targets = {c.args[0] for c in redis.delete.await_args_list}
-    assert "refresh:h1" in delete_targets
-    assert "refresh:h2" in delete_targets
-    assert f"refresh_user:{user.id}" in delete_targets
+    # Deletes must be batched: one call for the refresh-token hashes, one for the index set.
+    assert redis.delete.await_count == 2
+    deleted = {a for c in redis.delete.await_args_list for a in c.args}
+    assert "refresh:h1" in deleted
+    assert "refresh:h2" in deleted
+    assert f"refresh_user:{user.id}" in deleted
 
 
 def test_logout_requires_auth(client):

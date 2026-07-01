@@ -84,8 +84,9 @@ async def create_refresh_token(user_id: uuid.UUID, redis) -> str:
 async def revoke_all_refresh_tokens(user_id: uuid.UUID, redis) -> None:
     set_key = f"refresh_user:{user_id}"
     hashes = await redis.smembers(set_key)
-    for token_hash in hashes:
-        await redis.delete(f"refresh:{token_hash}")
+    keys = [f"refresh:{token_hash}" for token_hash in hashes]
+    if keys:
+        await redis.delete(*keys)
     await redis.delete(set_key)
 
 

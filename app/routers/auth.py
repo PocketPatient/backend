@@ -60,7 +60,7 @@ async def refresh(
     return TokenResponse(access_token=access_token, refresh_token=new_refresh)
 
 
-@router.post("/logout", status_code=204, summary="Revoke all of the caller's refresh tokens", responses=errors(401))
+@router.post("/logout", status_code=204, summary="Revoke all of the caller's refresh tokens", responses=errors(401, 429))
 async def logout(
     request: Request,
     current_user: User = Depends(get_current_user),

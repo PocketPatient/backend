@@ -282,6 +282,10 @@ async def test_rotate_removes_old_hash_from_user_index():
     db.execute = AsyncMock(return_value=result)
 
     from app import config as app_config
-    app_config.settings.jwt_private_key = app_config.settings.jwt_private_key or _TEST_PRIV
-    await verify_and_rotate_refresh_token(old_raw, redis, db)
-    redis.srem.assert_awaited_once_with(f"refresh_user:{user_id}", old_hash)
+    orig_priv = app_config.settings.jwt_private_key
+    app_config.settings.jwt_private_key = orig_priv or _TEST_PRIV
+    try:
+        await verify_and_rotate_refresh_token(old_raw, redis, db)
+        redis.srem.assert_awaited_once_with(f"refresh_user:{user_id}", old_hash)
+    finally:
+        app_config.settings.jwt_private_key = orig_priv
