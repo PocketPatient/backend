@@ -23,6 +23,18 @@ def test_strip_tags_plain_text_unchanged():
     assert strip_tags("Hello, how are you?") == "Hello, how are you?"
 
 
+def test_strip_tags_preserves_unclosed_angle_bracket_clinical_text():
+    assert strip_tags("mood <baseline and sleep poor") == "mood <baseline and sleep poor"
+
+
+def test_strip_tags_preserves_bp_reading_with_angle_bracket():
+    assert strip_tags("BP <120/80 today") == "BP <120/80 today"
+
+
+def test_strip_tags_removes_real_tag_alongside_unclosed_bracket():
+    assert strip_tags("<b>mood <baseline</b>") == "mood <baseline"
+
+
 def test_sanitize_text_returns_cleaned_within_limit():
     assert sanitize_text("<i>ok</i>", 10) == "ok"
 
@@ -56,10 +68,24 @@ def test_diagnosis_create_strips_tags_in_fields():
     d = DiagnosisCreate(
         primary_dx="<i>MDD</i>",
         differentials=["<b>GAD</b>"],
-        justification="Patient presents with " + "symptoms " * 5,
+        justification="Patient presents with <b>notable</b> " + "symptoms " * 5,
     )
     assert d.primary_dx == "MDD"
     assert d.differentials == ["GAD"]
+    assert "<b>" not in d.justification and "</b>" not in d.justification
+
+
+def test_diagnosis_create_rejects_primary_dx_emptied_by_stripping():
+    with pytest.raises(ValidationError):
+        DiagnosisCreate(primary_dx="<br>", justification="x" * 50)
+
+
+def test_diagnosis_create_rejects_justification_under_min_after_stripping():
+    # Raw length >= 50 but stripping the tags brings it below the 50-char minimum.
+    raw = "<b>" + "x" * 47 + "</b>"
+    assert len(raw) >= 50
+    with pytest.raises(ValidationError):
+        DiagnosisCreate(primary_dx="MDD", justification=raw)
 
 
 def test_course_create_strips_tags_in_title():

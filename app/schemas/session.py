@@ -100,10 +100,21 @@ class DiagnosisCreate(BaseModel):
     differentials: list[str] = Field(default_factory=list, max_length=3)
     justification: str = Field(min_length=50, max_length=2000)
 
-    @field_validator("primary_dx", "justification")
+    @field_validator("primary_dx")
     @classmethod
-    def _clean_text(cls, v: str) -> str:
-        return strip_tags(v)
+    def _clean_primary_dx(cls, v: str) -> str:
+        v = strip_tags(v)
+        if not v:
+            raise ValueError("primary_dx must not be empty")
+        return v
+
+    @field_validator("justification")
+    @classmethod
+    def _clean_justification(cls, v: str) -> str:
+        v = strip_tags(v)
+        if len(v) < 50:
+            raise ValueError("justification must be at least 50 characters")
+        return v
 
     @field_validator("differentials")
     @classmethod

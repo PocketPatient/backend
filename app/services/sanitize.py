@@ -1,29 +1,23 @@
 from __future__ import annotations
 
 import re
-from html.parser import HTMLParser
 
 _WHITESPACE_RE = re.compile(r"\s+")
-
-
-class _TagStripper(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self._chunks: list[str] = []
-
-    def handle_data(self, data: str) -> None:
-        self._chunks.append(data)
-
-    def get_text(self) -> str:
-        return "".join(self._chunks)
+TAG_RE = re.compile(r"</?[a-zA-Z][^<>]*>")
 
 
 def strip_tags(value: str) -> str:
-    """Remove HTML tags, collapse runs of whitespace, and trim."""
-    parser = _TagStripper()
-    parser.feed(value)
-    parser.close()
-    text = parser.get_text()
+    """Remove complete HTML tags, collapse runs of whitespace, and trim.
+
+    Only well-formed tags (``<tag ...>`` / ``</tag>``) are removed. A bare
+    ``<`` that isn't part of a complete tag (e.g. clinical shorthand like
+    "mood <baseline" or "BP <120/80") is left intact rather than truncating
+    the rest of the text. The tag body excludes both ``<`` and ``>`` (not
+    just ``>``) so a stray ``<`` can't be swallowed into an unrelated later
+    tag's match (e.g. "<b>mood <baseline</b>" must not let "<baseline</b>"
+    be treated as one tag).
+    """
+    text = TAG_RE.sub("", value)
     return _WHITESPACE_RE.sub(" ", text).strip()
 
 
