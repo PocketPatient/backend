@@ -65,6 +65,7 @@ def create_access_token(user: User) -> str:
         "sub": str(user.id),
         "email": user.email,
         "role": user.role.value if user.role else None,
+        "jti": str(uuid.uuid4()),
         "iat": now,
         "exp": now + timedelta(minutes=_ACCESS_TOKEN_EXPIRE_MINUTES),
     }

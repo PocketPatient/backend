@@ -220,3 +220,23 @@ async def test_verify_and_rotate_user_deleted_raises_401():
     with pytest.raises(HTTPException) as exc:
         await verify_and_rotate_refresh_token(raw_token, redis_mock, db)
     assert exc.value.status_code == 401
+
+
+def test_create_access_token_includes_jti(rsa_keys):
+    from app import config as app_config
+    private_pem, public_pem = rsa_keys
+    orig_priv, orig_pub = app_config.settings.jwt_private_key, app_config.settings.jwt_public_key
+    app_config.settings.jwt_private_key = private_pem
+    app_config.settings.jwt_public_key = public_pem
+    try:
+        user = User()
+        user.id = uuid.uuid4()
+        user.email = "a@rutgers.edu"
+        user.role = UserRole.student
+        token = create_access_token(user)
+        payload = jwt.decode(token, public_pem, algorithms=["RS256"])
+        assert "jti" in payload
+        uuid.UUID(payload["jti"])  # parses as a uuid
+    finally:
+        app_config.settings.jwt_private_key = orig_priv
+        app_config.settings.jwt_public_key = orig_pub
