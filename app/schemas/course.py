@@ -6,6 +6,8 @@ from datetime import datetime, time
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.services.sanitize import strip_tags
+
 
 class CourseCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
@@ -15,7 +17,7 @@ class CourseCreate(BaseModel):
     @classmethod
     def strip_title(cls, v: str) -> str:
         if isinstance(v, str):
-            v = v.strip()
+            v = strip_tags(v)
         return v
 
 

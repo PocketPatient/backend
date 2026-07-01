@@ -1,6 +1,9 @@
 import pytest
+from pydantic import ValidationError
 
 from app.services.sanitize import sanitize_text, strip_tags
+from app.schemas.session import DiagnosisCreate, MessageCreate
+from app.schemas.course import CourseCreate
 
 
 def test_strip_tags_removes_html():
@@ -32,3 +35,33 @@ def test_sanitize_text_raises_when_cleaned_exceeds_limit():
 def test_sanitize_text_limit_applies_to_cleaned_not_raw():
     # Raw is 20 chars but cleaned "ok" is 2 — must pass under limit 5.
     assert sanitize_text("<span>ok</span>ok", 5) == "okok"
+
+
+def test_message_create_strips_tags():
+    m = MessageCreate(content="<b>Hi doctor</b>")
+    assert m.content == "Hi doctor"
+
+
+def test_message_create_rejects_over_2000_cleaned_chars():
+    with pytest.raises(ValidationError):
+        MessageCreate(content="x" * 2001)
+
+
+def test_message_create_rejects_content_emptied_by_stripping():
+    with pytest.raises(ValidationError):
+        MessageCreate(content="<br><br>")
+
+
+def test_diagnosis_create_strips_tags_in_fields():
+    d = DiagnosisCreate(
+        primary_dx="<i>MDD</i>",
+        differentials=["<b>GAD</b>"],
+        justification="Patient presents with " + "symptoms " * 5,
+    )
+    assert d.primary_dx == "MDD"
+    assert d.differentials == ["GAD"]
+
+
+def test_course_create_strips_tags_in_title():
+    c = CourseCreate(title="<b>Intro to Psychiatry</b>")
+    assert c.title == "Intro to Psychiatry"

@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.models.message import MessageRole
 from app.models.session import SessionStatus
+from app.services.sanitize import sanitize_text, strip_tags
 
 
 class SessionCreate(BaseModel):
@@ -15,6 +16,14 @@ class SessionCreate(BaseModel):
 
 class MessageCreate(BaseModel):
     content: str = Field(min_length=1)
+
+    @field_validator("content")
+    @classmethod
+    def _clean_content(cls, v: str) -> str:
+        v = sanitize_text(v, 2000)
+        if not v:
+            raise ValueError("message must not be empty")
+        return v
 
 
 class MessageOut(BaseModel):
@@ -90,6 +99,16 @@ class DiagnosisCreate(BaseModel):
     primary_dx: str = Field(min_length=1, max_length=255)
     differentials: list[str] = Field(default_factory=list, max_length=3)
     justification: str = Field(min_length=50, max_length=2000)
+
+    @field_validator("primary_dx", "justification")
+    @classmethod
+    def _clean_text(cls, v: str) -> str:
+        return strip_tags(v)
+
+    @field_validator("differentials")
+    @classmethod
+    def _clean_differentials(cls, v: list[str]) -> list[str]:
+        return [strip_tags(item) for item in v]
 
 
 class DiagnosisResult(BaseModel):
