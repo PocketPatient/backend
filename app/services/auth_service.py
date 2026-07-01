@@ -81,6 +81,14 @@ async def create_refresh_token(user_id: uuid.UUID, redis) -> str:
     return raw_token
 
 
+async def revoke_all_refresh_tokens(user_id: uuid.UUID, redis) -> None:
+    set_key = f"refresh_user:{user_id}"
+    hashes = await redis.smembers(set_key)
+    for token_hash in hashes:
+        await redis.delete(f"refresh:{token_hash}")
+    await redis.delete(set_key)
+
+
 async def verify_and_rotate_refresh_token(
     token: str, redis, db: AsyncSession
 ) -> tuple[str, str]:

@@ -3,6 +3,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.deps import get_current_user
+from app.models.user import User
 from app.openapi import errors
 from app.services import auth_service
 
@@ -56,3 +58,12 @@ async def refresh(
         body.refresh_token, request.app.state.redis, db
     )
     return TokenResponse(access_token=access_token, refresh_token=new_refresh)
+
+
+@router.post("/logout", status_code=204, summary="Revoke all of the caller's refresh tokens", responses=errors(401))
+async def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+):
+    await auth_service.revoke_all_refresh_tokens(current_user.id, request.app.state.redis)
+    return None
