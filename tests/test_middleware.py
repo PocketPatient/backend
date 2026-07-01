@@ -109,19 +109,48 @@ async def test_validation_error_includes_code(client):
 
 @pytest.mark.asyncio
 async def test_rate_limit_auth_endpoint(client_with_counting_redis):
-    """Auth endpoint: 20 req/min limit. 21st request gets 429."""
+    """Auth endpoint: 10 req/min limit. 11th request gets 429."""
     client = client_with_counting_redis
-    for i in range(20):
-        resp = await client.post(
-            "/api/v1/auth/login",
-            json={"firebase_id_token": "bad"},
-        )
+    for i in range(10):
+        resp = await client.post("/api/v1/auth/login", json={"firebase_id_token": "bad"})
         assert resp.status_code != 429, f"Got 429 on request {i + 1}"
-
-    resp = await client.post(
-        "/api/v1/auth/login",
-        json={"firebase_id_token": "bad"},
-    )
+    resp = await client.post("/api/v1/auth/login", json={"firebase_id_token": "bad"})
     assert resp.status_code == 429
-    data = resp.json()
-    assert data["code"] == "RATE_LIMIT_EXCEEDED"
+    assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_message_endpoint(client_with_counting_redis):
+    """Message send: 30 req/min. 31st POST gets 429 (routing errors still count)."""
+    client = client_with_counting_redis
+    path = f"/api/v1/sessions/{_uuid.uuid4()}/messages"
+    for i in range(30):
+        resp = await client.post(path, json={"content": "hi"})
+        assert resp.status_code != 429, f"Got 429 on request {i + 1}"
+    resp = await client.post(path, json={"content": "hi"})
+    assert resp.status_code == 429
+    assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_analytics_endpoint(client_with_counting_redis):
+    """Analytics: 60 req/min. 61st request gets 429."""
+    client = client_with_counting_redis
+    path = "/api/v1/analytics/overview"
+    for i in range(60):
+        resp = await client.get(path)
+        assert resp.status_code != 429, f"Got 429 on request {i + 1}"
+    resp = await client.get(path)
+    assert resp.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_standard_endpoint(client_with_counting_redis):
+    """Other endpoints: 100 req/min. 101st request gets 429."""
+    client = client_with_counting_redis
+    path = f"/api/v1/courses/{_uuid.uuid4()}"
+    for i in range(100):
+        resp = await client.get(path)
+        assert resp.status_code != 429, f"Got 429 on request {i + 1}"
+    resp = await client.get(path)
+    assert resp.status_code == 429

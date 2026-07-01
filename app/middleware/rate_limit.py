@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Awaitable, Callable
 
 from jose import JWTError, jwt
@@ -10,7 +11,12 @@ from starlette.responses import JSONResponse, Response
 from app.config import settings
 
 _AUTH_PREFIX = "/api/v1/auth"
-_AUTH_LIMIT = 20
+_ANALYTICS_PREFIX = "/api/v1/analytics"
+_MESSAGE_RE = re.compile(r"^/api/v1/sessions/[^/]+/messages/?$")
+
+_AUTH_LIMIT = 10
+_MESSAGE_LIMIT = 30
+_ANALYTICS_LIMIT = 60
 _STANDARD_LIMIT = 100
 _WINDOW_SECONDS = 60
 
@@ -34,6 +40,13 @@ def _extract_user_id(request: Request) -> str | None:
         return None
 
 
+def _user_key(request: Request, tier: str) -> str:
+    user_id = _extract_user_id(request)
+    if user_id:
+        return f"rl:{tier}:user:{user_id}"
+    return f"rl:{tier}:ip:{_client_ip(request)}"
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
         redis = getattr(getattr(request, "app", None), "state", None)
@@ -41,14 +54,19 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         if redis is None:
             return await call_next(request)
 
-        is_auth = request.url.path.startswith(_AUTH_PREFIX)
-        limit = _AUTH_LIMIT if is_auth else _STANDARD_LIMIT
-
-        if is_auth:
+        path = request.url.path
+        if path.startswith(_AUTH_PREFIX):
+            limit = _AUTH_LIMIT
             key = f"rl:auth:{_client_ip(request)}"
+        elif request.method == "POST" and _MESSAGE_RE.match(path):
+            limit = _MESSAGE_LIMIT
+            key = _user_key(request, "msg")
+        elif path.startswith(_ANALYTICS_PREFIX):
+            limit = _ANALYTICS_LIMIT
+            key = _user_key(request, "analytics")
         else:
-            user_id = _extract_user_id(request)
-            key = f"rl:user:{user_id}" if user_id else f"rl:ip:{_client_ip(request)}"
+            limit = _STANDARD_LIMIT
+            key = _user_key(request, "std")
 
         try:
             pipe = redis.pipeline()
