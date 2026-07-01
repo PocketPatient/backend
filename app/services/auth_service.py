@@ -76,6 +76,8 @@ async def create_refresh_token(user_id: uuid.UUID, redis) -> str:
     raw_token = secrets.token_hex(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
     await redis.setex(f"refresh:{token_hash}", _REFRESH_TOKEN_EXPIRE_SECONDS, str(user_id))
+    await redis.sadd(f"refresh_user:{user_id}", token_hash)
+    await redis.expire(f"refresh_user:{user_id}", _REFRESH_TOKEN_EXPIRE_SECONDS)
     return raw_token
 
 
@@ -87,6 +89,7 @@ async def verify_and_rotate_refresh_token(
     user_id_str = await redis.getdel(key)
     if not user_id_str:
         raise HTTPException(status_code=401, detail="Refresh token invalid or expired")
+    await redis.srem(f"refresh_user:{user_id_str}", token_hash)
     result = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
     user = result.scalar_one_or_none()
     if user is None:

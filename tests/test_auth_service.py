@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
 from fastapi import HTTPException
 from jose import jwt
 
@@ -15,6 +17,12 @@ from app.services.auth_service import (
     verify_and_rotate_refresh_token,
     verify_firebase_token,
 )
+
+_TEST_PRIV = _rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+    encoding=serialization.Encoding.PEM,
+    format=serialization.PrivateFormat.TraditionalOpenSSL,
+    encryption_algorithm=serialization.NoEncryption(),
+).decode()
 
 
 # ── verify_firebase_token ──────────────────────────────────────────────────────
@@ -240,3 +248,40 @@ def test_create_access_token_includes_jti(rsa_keys):
     finally:
         app_config.settings.jwt_private_key = orig_priv
         app_config.settings.jwt_public_key = orig_pub
+
+
+# ── Per-user refresh-token index ──────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_create_refresh_token_adds_to_user_index():
+    redis = AsyncMock()
+    user_id = uuid.uuid4()
+    raw = await create_refresh_token(user_id, redis)
+    expected_hash = hashlib.sha256(raw.encode()).hexdigest()
+    redis.setex.assert_awaited_once()
+    redis.sadd.assert_awaited_once_with(f"refresh_user:{user_id}", expected_hash)
+    redis.expire.assert_awaited_once()  # TTL set on the index set
+
+
+@pytest.mark.asyncio
+async def test_rotate_removes_old_hash_from_user_index():
+    user_id = uuid.uuid4()
+    old_raw = "old-token"
+    old_hash = hashlib.sha256(old_raw.encode()).hexdigest()
+    redis = AsyncMock()
+    redis.getdel = AsyncMock(return_value=str(user_id))
+
+    db = MagicMock()
+    user = User()
+    user.id = user_id
+    user.email = "a@rutgers.edu"
+    user.role = UserRole.student
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = user
+    db.execute = AsyncMock(return_value=result)
+
+    from app import config as app_config
+    app_config.settings.jwt_private_key = app_config.settings.jwt_private_key or _TEST_PRIV
+    await verify_and_rotate_refresh_token(old_raw, redis, db)
+    redis.srem.assert_awaited_once_with(f"refresh_user:{user_id}", old_hash)
