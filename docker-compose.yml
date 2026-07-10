@@ -19,20 +19,39 @@ services:
     ports:
       - "6379:6379"
 
-  celery-worker:
+  api:
     build: .
-    command: celery -A app.celery_app worker --loglevel=info
     restart: unless-stopped
     env_file: .env
+    environment:
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/pocketpatient
+      redis_url: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+      - redis
+
+  celery-worker:
+    build: .
+    command: uv run celery -A app.celery_app worker --loglevel=info
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/pocketpatient
+      redis_url: redis://redis:6379/0
     depends_on:
       - db
       - redis
 
   celery-beat:
     build: .
-    command: celery -A app.celery_app beat --loglevel=info
+    command: uv run celery -A app.celery_app beat --loglevel=info
     restart: unless-stopped
     env_file: .env
+    environment:
+      database_url: postgresql+asyncpg://postgres:postgres@db:5432/pocketpatient
+      redis_url: redis://redis:6379/0
     depends_on:
       - db
       - redis
