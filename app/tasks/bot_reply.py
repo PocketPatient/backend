@@ -51,7 +51,7 @@ async def _generate_and_send(session_id: str, my_task_id: str) -> None:
         messages = await get_session_messages(session.id, db)
         history = build_history(messages)
 
-        patient_name, patient_age = patient_identity(session.id.int)
+        patient_name, patient_age, _ = patient_identity(session.id.int)
         import time
         _t0 = time.perf_counter()
         reply_text = await generate_in_character(

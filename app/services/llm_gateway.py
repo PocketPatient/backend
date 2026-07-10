@@ -17,9 +17,12 @@ from app.models.disease import Disease
 
 logger = logging.getLogger(__name__)
 
-_PATIENT_NAMES = [
-    "Sarah", "Michael", "Jennifer", "James", "Lisa",
-    "Robert", "Emily", "David", "Maria", "Kevin",
+# Name is paired with a gender so the generated persona stays internally
+# consistent (e.g. "Sarah" reads as female on the patient card).
+_PATIENT_PROFILES = [
+    ("Sarah", "female"), ("Michael", "male"), ("Jennifer", "female"),
+    ("James", "male"), ("Lisa", "female"), ("Robert", "male"),
+    ("Emily", "female"), ("David", "male"), ("Maria", "female"), ("Kevin", "male"),
 ]
 
 _OPENING_PROMPT = "Generate your first message reaching out to a doctor for help."
@@ -39,12 +42,12 @@ class _GradingSchema(_PydBaseModel):
     feedback: str
 
 
-def patient_identity(session_id_int: int) -> tuple[str, int]:
-    """Deterministically generate patient name + age from session UUID int."""
+def patient_identity(session_id_int: int) -> tuple[str, int, str]:
+    """Deterministically generate patient name, age, and gender from session UUID int."""
     rng = random.Random(session_id_int)
-    name = rng.choice(_PATIENT_NAMES)
+    name, gender = rng.choice(_PATIENT_PROFILES)
     age = rng.randint(25, 65)
-    return name, age
+    return name, age, gender
 
 
 class LLMGateway:

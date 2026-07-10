@@ -62,6 +62,9 @@ class SessionOut(BaseModel):
     id: uuid.UUID = Field(description="Unique session identifier.")
     disease_id: uuid.UUID = Field(description="ID of the disease case assigned to this session.")
     course_id: uuid.UUID = Field(description="ID of the course this session belongs to.")
+    patient_name: str = Field(description="Display name of the simulated patient.")
+    patient_age: int = Field(description="Age of the simulated patient.")
+    patient_gender: str = Field(description="Gender of the simulated patient.")
     status: SessionStatus = Field(description="Current session status: active, diagnosed, or abandoned.")
     turn_count: int = Field(description="Number of message turns exchanged so far.")
     started_at: datetime = Field(description="ISO-8601 timestamp when the session was started.")
@@ -76,6 +79,9 @@ class SessionOut(BaseModel):
                 "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                 "disease_id": "4cb96e75-6828-4673-a4bd-3d074b77c1b7",
                 "course_id": "5dc07f86-7939-4784-b5ce-4e185c88d2c8",
+                "patient_name": "Sarah",
+                "patient_age": 34,
+                "patient_gender": "female",
                 "status": "active",
                 "turn_count": 4,
                 "started_at": "2026-09-15T09:00:00Z",

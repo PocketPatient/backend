@@ -205,27 +205,31 @@ async def test_generate_patient_message_formats_history(mock_genai):
 async def test_patient_identity_deterministic():
     from app.services.llm_gateway import patient_identity
 
-    name1, age1 = patient_identity(12345)
-    name2, age2 = patient_identity(12345)
+    name1, age1, gender1 = patient_identity(12345)
+    name2, age2, gender2 = patient_identity(12345)
 
     assert name1 == name2
     assert age1 == age2
+    assert gender1 == gender2
     assert isinstance(name1, str)
     assert 25 <= age1 <= 65
+    assert gender1 in {"male", "female"}
 
 
 @pytest.mark.asyncio
 async def test_patient_identity_varies_by_seed():
     from app.services.llm_gateway import patient_identity
 
-    name1, age1 = patient_identity(111)
-    name2, age2 = patient_identity(999999)
+    name1, age1, gender1 = patient_identity(111)
+    name2, age2, gender2 = patient_identity(999999)
 
     # Pinned expected values — deterministic by seed
     assert name1 == "James"
     assert age1 == 45
+    assert gender1 == "male"
     assert name2 == "James"
     assert age2 == 40
+    assert gender2 == "male"
     assert (name1, age1) != (name2, age2)
 
 

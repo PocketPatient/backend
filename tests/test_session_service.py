@@ -78,6 +78,26 @@ async def test_create_new_session_returns_session_and_opening_message(db_session
     assert message.session_id == session.id
 
 
+async def test_create_new_session_persists_patient_persona(db_session, setup):
+    _, stu, course, disease = setup
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hi, I need some help.")
+        from app.services.session_service import create_new_session
+        session, _ = await create_new_session(stu.id, course.id, db_session)
+
+    assert session.patient_name
+    assert isinstance(session.patient_age, int)
+    assert 0 < session.patient_age < 120
+    assert session.patient_gender in {"male", "female"}
+
+    # Persona must survive a reload from the DB, not just live in memory.
+    persona = (session.patient_name, session.patient_age, session.patient_gender)
+    db_session.expire(session)
+    await db_session.refresh(session)
+    assert (session.patient_name, session.patient_age, session.patient_gender) == persona
+
+
 async def test_create_new_session_picks_from_disease_pool(db_session, setup):
     _, stu, course, disease = setup
 

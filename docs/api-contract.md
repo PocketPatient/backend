@@ -210,7 +210,7 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | POST | `/api/v1/sessions/{session_id}/messages` | Send a student reply; the AI patient's response is generated and pushed asynchronously | Bearer JWT (student owner, active session) | ✅ Week 10 |
 | POST | `/api/v1/sessions/{session_id}/diagnose` | Submit a diagnosis; grade or hint | Bearer JWT (student owner) | ✅ Week 8 |
 
-`SessionOut` — id, disease_id, course_id, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`), and (diagnosed only) `score` (ScoreOut) + `reveal` (disease_name, dsm_code, unit_label).
+`SessionOut` — id, disease_id, course_id, patient_name, patient_age, patient_gender, status (`active`/`diagnosed`/`abandoned`), turn_count, started_at, messages (`list[MessageOut]`), and (diagnosed only) `score` (ScoreOut) + `reveal` (disease_name, dsm_code, unit_label). The `patient_*` fields are the simulated patient's persona (deterministically generated at session creation) for rendering the case card.
 `MessageOut` — id, role (`student`/`patient`/`system`), content, sent_at, response_latency_sec.
 
 ### POST /api/v1/sessions

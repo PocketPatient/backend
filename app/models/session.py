@@ -45,6 +45,13 @@ class Session(Base):
     course_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("courses.id"), nullable=False
     )
+    # Patient persona surfaced on the case card. Generated at session creation and
+    # embedded in the LLM system prompt; persisted here so it's queryable.
+    # create_new_session always sets real (deterministic) values — the defaults are a
+    # NOT-NULL safety net for the rare path that builds a Session without a persona.
+    patient_name: Mapped[str] = mapped_column(String(100), nullable=False, default="Unknown")
+    patient_age: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    patient_gender: Mapped[str] = mapped_column(String(20), nullable=False, default="unknown")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True

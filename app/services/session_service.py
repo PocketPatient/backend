@@ -81,10 +81,19 @@ async def create_new_session(
         raise HTTPException(status_code=422, detail="No diseases available in the course pool")
 
     disease = random.choice(diseases)
+    # Generate the id upfront so the persona (seeded off it) can be persisted on the
+    # initial INSERT. patient_identity is seeded off the session UUID, so the persona
+    # stored here is identical to the one the bot-reply/nudge tasks regenerate later.
+    session_id = uuid.uuid4()
+    patient_name, patient_age, patient_gender = patient_identity(session_id.int)
     session = Session(
+        id=session_id,
         disease_id=disease.id,
         user_id=user_id,
         course_id=course_id,
+        patient_name=patient_name,
+        patient_age=patient_age,
+        patient_gender=patient_gender,
         started_at=datetime.now(timezone.utc),
         status=SessionStatus.active,
         turn_count=0,
@@ -92,7 +101,6 @@ async def create_new_session(
     db.add(session)
     await db.flush()
 
-    patient_name, patient_age = patient_identity(session.id.int)
     opening_text = await generate_in_character(
         lambda: gateway.generate_opening_message(disease, patient_name, patient_age),
         disease_name=disease.name,

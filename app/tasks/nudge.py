@@ -97,7 +97,7 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
         return
 
     hours = round((now - _aware(last_message.sent_at)).total_seconds() / 3600)
-    patient_name, patient_age = patient_identity(session.id.int)
+    patient_name, patient_age, _ = patient_identity(session.id.int)
     text = await gateway.generate_nudge_message(disease, patient_name, patient_age, hours)
 
     db.add(Message(

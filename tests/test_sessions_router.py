@@ -196,6 +196,30 @@ async def test_get_session_by_id_student_owner(client, setup, db_session):
     assert len(data["messages"]) == 1
 
 
+async def test_get_session_includes_patient_persona(client, setup):
+    _, _, _, stu_token, course, _ = setup
+
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hi, I need help.")
+        create = await client.post(
+            "/api/v1/sessions",
+            json={"course_id": str(course.id)},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+    assert create.status_code == 201
+    session_id = create.json()["id"]
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session_id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["patient_name"]
+    assert isinstance(data["patient_age"], int)
+    assert data["patient_gender"] in {"male", "female"}
+
+
 async def test_get_session_by_id_professor_of_course(client, setup, db_session):
     prof, prof_token, stu, _, course, disease = setup
 
