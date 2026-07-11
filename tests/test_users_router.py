@@ -11,7 +11,8 @@ from app.main import app
 from app.models.user import User, UserRole
 
 
-def make_user(role=None, is_verified=None):
+def make_user(role=None, is_verified=None, push_enabled=True,
+              quiet_hours_start=None, quiet_hours_end=None):
     user = User()
     user.id = uuid.uuid4()
     user.google_uid = "test-uid"
@@ -20,6 +21,9 @@ def make_user(role=None, is_verified=None):
     user.is_verified = is_verified
     user.display_name = "Test User"
     user.created_at = datetime.now(timezone.utc)
+    user.push_enabled = push_enabled
+    user.quiet_hours_start = quiet_hours_start
+    user.quiet_hours_end = quiet_hours_end
     return user
 
 
@@ -47,6 +51,37 @@ def test_get_me_returns_user_profile(authed_client):
     assert body["email"] == "test@rutgers.edu"
     assert body["role"] == "student"
     assert body["is_verified"] is True
+
+
+def test_get_me_includes_notification_preferences():
+    """GET /users/me must return current push/quiet-hours state — otherwise
+    a settings screen has no way to know what's already saved before the
+    user touches anything (only PUT .../notification-preferences existed)."""
+    from datetime import time
+
+    user = make_user(
+        UserRole.student,
+        is_verified=True,
+        push_enabled=False,
+        quiet_hours_start=time(22, 0),
+        quiet_hours_end=time(8, 0),
+    )
+
+    async def _override_user():
+        return user
+
+    app.state.redis = AsyncMock()
+    app.dependency_overrides[get_current_user] = _override_user
+    client = TestClient(app)
+    try:
+        response = client.get("/api/v1/users/me")
+        assert response.status_code == 200
+        body = response.json()
+        assert body["push_enabled"] is False
+        assert body["quiet_hours_start"] == "22:00:00"
+        assert body["quiet_hours_end"] == "08:00:00"
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_get_me_no_auth_returns_401():

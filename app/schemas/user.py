@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, time
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -20,6 +20,9 @@ class UserOut(BaseModel):
     is_verified: bool | None = Field(description="Whether the user account has been verified.")
     display_name: str | None
     created_at: datetime = Field(description="ISO-8601 timestamp when the account was created.")
+    push_enabled: bool = Field(description="Whether push notifications are enabled for the user.")
+    quiet_hours_start: time | None = Field(default=None, description="Local time when quiet hours begin (push suppressed).")
+    quiet_hours_end: time | None = Field(default=None, description="Local time when quiet hours end.")
 
     model_config = {
         "from_attributes": True,
@@ -31,6 +34,9 @@ class UserOut(BaseModel):
                 "is_verified": True,
                 "display_name": "Jane Smith",
                 "created_at": "2026-09-01T10:00:00Z",
+                "push_enabled": True,
+                "quiet_hours_start": "22:00:00",
+                "quiet_hours_end": "08:00:00",
             }
         },
     }
