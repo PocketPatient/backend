@@ -40,6 +40,17 @@ class ParseResult:
 
 _REQUIRED_STR_FIELDS = ("name", "category", "speech_style")
 
+# Max lengths mirror the DB column definitions (see app/models/disease.py and
+# app/models/unit.py). Enforced here so over-length values surface as parse
+# errors at preview time instead of a 500 (asyncpg truncation) on INSERT.
+_MAX_LENGTHS = {
+    "name": 255,        # Disease.name = String(255)
+    "category": 100,    # Disease.category = String(100)
+    "speech_style": 100,  # Disease.speech_style = String(100)
+    "dsm_code": 20,     # Disease.dsm_code = String(20)
+}
+_MAX_UNIT_LABEL = 100   # Unit.label = String(100)
+
 
 def _validate_disease(raw: dict[str, Any], path: str, errors: list[ParseError]) -> ParsedDisease | None:
     ok = True
@@ -47,6 +58,9 @@ def _validate_disease(raw: dict[str, Any], path: str, errors: list[ParseError]) 
         v = raw.get(f)
         if not isinstance(v, str) or not v.strip():
             errors.append(ParseError(location=f"{path}.{f}", message=f"missing or empty required field: {f}"))
+            ok = False
+        elif len(v.strip()) > _MAX_LENGTHS[f]:
+            errors.append(ParseError(location=f"{path}.{f}", message=f"{f} exceeds maximum length of {_MAX_LENGTHS[f]} characters"))
             ok = False
 
     tier = raw.get("difficulty_tier")
@@ -81,6 +95,10 @@ def _validate_disease(raw: dict[str, Any], path: str, errors: list[ParseError]) 
         dsm = None
     elif isinstance(dsm_raw, str):
         dsm = dsm_raw.strip() or None
+        if dsm is not None and len(dsm) > _MAX_LENGTHS["dsm_code"]:
+            errors.append(ParseError(location=f"{path}.dsm_code", message=f"dsm_code exceeds maximum length of {_MAX_LENGTHS['dsm_code']} characters"))
+            dsm = None
+            ok = False
     else:
         errors.append(ParseError(location=f"{path}.dsm_code", message="dsm_code must be a string"))
         dsm = None
@@ -131,6 +149,9 @@ def parse_json(text: str) -> ParseResult:
         label = unit_raw.get("label")
         if not isinstance(label, str) or not label.strip():
             result.errors.append(ParseError(location=f"units[{ui}].label", message="unit label is required"))
+            continue
+        if len(label.strip()) > _MAX_UNIT_LABEL:
+            result.errors.append(ParseError(location=f"units[{ui}].label", message=f"unit label exceeds maximum length of {_MAX_UNIT_LABEL} characters"))
             continue
         diseases_raw = unit_raw.get("diseases")
         if not isinstance(diseases_raw, list):
@@ -198,6 +219,9 @@ def parse_csv(text: str) -> ParseResult:
         if not unit_label:
             result.errors.append(ParseError(location=f"{location}.unit_label", message="unit_label is required"))
             continue
+        if len(unit_label) > _MAX_UNIT_LABEL:
+            result.errors.append(ParseError(location=f"{location}.unit_label", message=f"unit_label exceeds maximum length of {_MAX_UNIT_LABEL} characters"))
+            continue
 
         tier_raw = (row.get("difficulty_tier") or "").strip()
         try:
@@ -238,7 +262,14 @@ def parse_csv(text: str) -> ParseResult:
 
 def parse(filename: str, raw: bytes) -> ParseResult:
     ext = PurePath(filename).suffix.lower().lstrip(".")
-    text = raw.decode("utf-8")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as e:
+        result = ParseResult()
+        result.errors.append(
+            ParseError(location="<root>", message=f"file is not valid UTF-8 text: {e}")
+        )
+        return result
     if ext == "json":
         return parse_json(text)
     if ext == "csv":

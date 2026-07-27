@@ -11,11 +11,39 @@ from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
-from app.services.grading_service import compute_response_time_score, grade_diagnosis
+from app.services.grading_service import (
+    _build_transcript,
+    compute_response_time_score,
+    grade_diagnosis,
+)
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
 
 _NUDGE = {"frequency": "low", "tone": "neutral", "example": ""}
+
+
+def _msg(role: MessageRole, content: str) -> Message:
+    return Message(
+        session_id=None,
+        role=role,
+        content=content,
+        sent_at=datetime.now(timezone.utc),
+        is_nudge=False,
+    )
+
+
+def test_build_transcript_excludes_system_audit_rows():
+    messages = [
+        _msg(MessageRole.patient, "Hi doc."),
+        _msg(MessageRole.system, "[regenerated: diagnosis_leak]"),
+        _msg(MessageRole.student, "Tell me more."),
+        _msg(MessageRole.system, "[fallback used: ai_break]"),
+    ]
+    transcript = _build_transcript(messages)
+    assert "diagnosis_leak" not in transcript
+    assert "fallback used" not in transcript
+    assert "[regenerated" not in transcript
+    assert transcript == "Patient: Hi doc.\nStudent: Tell me more."
 
 
 def test_time_score_none_is_neutral():

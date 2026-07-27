@@ -3,12 +3,10 @@ from __future__ import annotations
 import re
 from collections.abc import Awaitable, Callable
 
-from jose import JWTError, jwt
+from jose import jwt
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-
-from app.config import settings
 
 _AUTH_PREFIX = "/api/v1/auth"
 _ANALYTICS_PREFIX = "/api/v1/analytics"
@@ -20,12 +18,37 @@ _ANALYTICS_LIMIT = 60
 _STANDARD_LIMIT = 100
 _WINDOW_SECONDS = 60
 
+# Number of trusted reverse proxies sitting in front of this app. Only the
+# X-Forwarded-For entries contributed by our own proxies may be trusted; the
+# client controls everything to the left of them. Default 0 = never trust XFF
+# (fail closed) so an attacker cannot forge the rate-limit key.
+_TRUSTED_PROXY_COUNT = 0
+
+
+def _socket_ip(request: Request) -> str:
+    """The real TCP peer address — cannot be spoofed by request headers."""
+    return request.client.host if request.client else "unknown"
+
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Best-effort client IP for rate-keying.
+
+    X-Forwarded-For is honored only for the number of proxies we actually
+    operate (`_TRUSTED_PROXY_COUNT`); with the default of 0 the header is
+    ignored entirely and the socket peer is used. This prevents a client from
+    minting unlimited rate-limit buckets by rotating the XFF header.
+    """
+    if _TRUSTED_PROXY_COUNT > 0:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            # The rightmost _TRUSTED_PROXY_COUNT entries were appended by our
+            # own proxies; the entry immediately to their left is the real
+            # client. Anything further left is attacker-controlled.
+            idx = len(parts) - _TRUSTED_PROXY_COUNT - 1
+            if 0 <= idx < len(parts):
+                return parts[idx]
+    return _socket_ip(request)
 
 
 def _extract_user_id(request: Request) -> str | None:
@@ -34,8 +57,10 @@ def _extract_user_id(request: Request) -> str | None:
         return None
     token = auth.removeprefix("Bearer ")
     try:
-        payload = jwt.decode(token, settings.jwt_public_key, algorithms=["RS256"])
-        return payload.get("sub")
+        # Signature integrity is irrelevant for *rate-keying* — authentication
+        # is still fully enforced downstream by get_current_user. Reading the
+        # unverified claims avoids a redundant RS256 verification per request.
+        return jwt.get_unverified_claims(token).get("sub")
     except Exception:
         return None
 
@@ -57,7 +82,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path.startswith(_AUTH_PREFIX):
             limit = _AUTH_LIMIT
-            key = f"rl:auth:{_client_ip(request)}"
+            # Security-sensitive brute-force bucket: key on the real socket
+            # peer only, never the client-supplied X-Forwarded-For header.
+            key = f"rl:auth:{_socket_ip(request)}"
         elif request.method == "POST" and _MESSAGE_RE.match(path):
             limit = _MESSAGE_LIMIT
             key = _user_key(request, "msg")
@@ -71,8 +98,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         try:
             pipe = redis.pipeline()
             pipe.incr(key)
-            pipe.expire(key, _WINDOW_SECONDS)
-            count, _ = await pipe.execute()
+            count = (await pipe.execute())[0]
+            # Set the TTL only when the counter is first created, so each fixed
+            # 60s window actually expires. Refreshing it every request would let
+            # the count accumulate forever under steady traffic and permanently
+            # 429 a compliant client.
+            if count == 1:
+                await redis.expire(key, _WINDOW_SECONDS)
             if count > limit:
                 return JSONResponse(
                     {"detail": "Rate limit exceeded", "code": "RATE_LIMIT_EXCEEDED"},

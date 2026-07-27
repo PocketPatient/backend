@@ -21,6 +21,7 @@ ERROR_RESPONSES: dict[int, dict] = {
     403: _err("FORBIDDEN", "Authenticated but not allowed.", "Insufficient role."),
     404: _err("NOT_FOUND", "Resource not found or not owned by caller.", "Not found."),
     409: _err("CONFLICT", "Conflicts with existing state.", "Already exists."),
+    410: _err("GONE", "Resource is no longer available.", "No longer active."),
     422: _err("VALIDATION_ERROR", "Request body failed validation.", "Validation error."),
     429: _err("RATE_LIMIT_EXCEEDED", "Too many requests.", "Rate limit exceeded."),
 }

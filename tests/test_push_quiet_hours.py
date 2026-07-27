@@ -55,6 +55,31 @@ def test_send_push_delivers_outside_quiet_hours():
         mock_apply.assert_not_called()
 
 
+def test_send_push_suppressed_by_local_quiet_hours_not_utc():
+    """Quiet hours are LOCAL time. A UTC instant that maps into the local quiet
+    window must be suppressed even though the same instant in UTC would fall
+    outside the window."""
+    from app.tasks.push_notifications import send_push, APP_TIMEZONE
+
+    # Quiet window 22:00-23:00 LOCAL. 2026-07-01 02:30 UTC == 2026-06-30 22:30 EDT,
+    # which is inside the local window; but 02:30 in UTC is NOT in [22:00, 23:00).
+    fixed_utc = datetime(2026, 7, 1, 2, 30, tzinfo=timezone.utc)
+    fixed_local = fixed_utc.astimezone(APP_TIMEZONE)
+
+    with patch("app.tasks.push_notifications.run_task_async",
+               return_value=_state(qs=time(22, 0), qe=time(23, 0))), \
+         patch("app.tasks.push_notifications.datetime") as mock_dt, \
+         patch("app.services.push_service.send_push_notification") as mock_send, \
+         patch.object(send_push, "apply_async") as mock_apply:
+        mock_dt.now.return_value = fixed_local
+
+        send_push.apply(args=ARGS)
+
+        # Real is_within_quiet_hours / next_window_open run — suppressed & requeued.
+        mock_send.assert_not_called()
+        mock_apply.assert_called_once()
+
+
 def test_send_push_skips_quiet_check_when_no_window_set():
     from app.tasks.push_notifications import send_push
 

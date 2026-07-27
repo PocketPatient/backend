@@ -21,6 +21,10 @@ from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
 from app.models.user import User, UserRole
 from app.services import session_service
+from app.services.messaging import (
+    is_within_messaging_window,
+    window_end_utc as compute_window_end_utc,
+)
 from app.tasks.push_notifications import send_push
 
 logger = logging.getLogger(__name__)
@@ -40,16 +44,20 @@ async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime, 
         now_utc = datetime.now(timezone.utc)
         eligible: list[tuple[uuid.UUID, uuid.UUID, datetime, str]] = []
 
+        # TODO(perf): this runs one students query per in-window course, and
+        # check_and_initiate_cases below does a blocking sync-Redis SET per
+        # student. Fine at current scale; batch the queries / pipeline Redis if
+        # course/student counts grow.
+
         for course in courses:
             tz = ZoneInfo(course.msg_timezone)
             now_local = now_utc.astimezone(tz)
 
-            if not (course.msg_window_start <= now_local.time() < course.msg_window_end):
+            # Single source of truth for the window check (half-open [start, end)).
+            if not is_within_messaging_window(course, _now=now_local.time()):
                 continue
 
-            window_end_naive = datetime.combine(now_local.date(), course.msg_window_end)
-            window_end_local = window_end_naive.replace(tzinfo=tz)
-            window_end_utc = window_end_local.astimezone(timezone.utc)
+            window_end_utc = compute_window_end_utc(course, now_local)
 
             if window_end_utc <= now_utc:
                 continue
@@ -138,11 +146,21 @@ def initiate_case(user_id: str, course_id: str) -> None:
     try:
         session_id = run_task_async(_check_and_create(user_id, course_id))
     except HTTPException as exc:
-        logger.warning(
-            "initiate_case: skipping user=%s course=%s — %s",
-            user_id, course_id, exc.detail,
+        # Only an empty disease pool (422, raised by create_new_session) is a
+        # routine skip. Any other HTTPException — e.g. a 502 gateway error while
+        # generating the opening message — must NOT be swallowed as a skip:
+        # log it as an error and re-raise so Celery can retry.
+        if exc.status_code == 422:
+            logger.warning(
+                "initiate_case: skipping user=%s course=%s — %s",
+                user_id, course_id, exc.detail,
+            )
+            return
+        logger.error(
+            "initiate_case: unexpected HTTP %s for user=%s course=%s — %s",
+            exc.status_code, user_id, course_id, exc.detail,
         )
-        return
+        raise
     except IntegrityError:
         logger.info(
             "initiate_case: IntegrityError (race) user=%s course=%s", user_id, course_id

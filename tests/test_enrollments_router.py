@@ -148,7 +148,7 @@ async def test_list_students_wrong_professor_returns_404(client, professor, rsa_
         google_uid=f"other3-{uuid.uuid4().hex}",
         email=f"other3-{uuid.uuid4().hex[:8]}@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
         display_name="Other Prof",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

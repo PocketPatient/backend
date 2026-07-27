@@ -13,9 +13,9 @@ class CourseCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     semester: str | None = Field(None, max_length=20)
 
-    @field_validator("title", mode="before")
+    @field_validator("title", "semester", mode="before")
     @classmethod
-    def strip_title(cls, v: str) -> str:
+    def strip_html(cls, v: str | None) -> str | None:
         if isinstance(v, str):
             v = strip_tags(v)
         return v
@@ -28,11 +28,11 @@ class CourseUpdate(BaseModel):
     msg_window_end: time | None = None
     msg_timezone: str | None = None
 
-    @field_validator("title", mode="before")
+    @field_validator("title", "semester", mode="before")
     @classmethod
-    def strip_title(cls, v: str | None) -> str | None:
+    def strip_html(cls, v: str | None) -> str | None:
         if isinstance(v, str):
-            v = v.strip()
+            v = strip_tags(v)
         return v
 
     @field_validator("msg_timezone")

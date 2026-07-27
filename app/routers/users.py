@@ -34,6 +34,10 @@ async def set_role(
     if current_user.role is not None:
         raise HTTPException(status_code=409, detail="Role already set")
     current_user.role = UserRole(body.role)
+    # A self-assigned professor is NOT verified: is_verified stays False here and
+    # can only be flipped True out-of-band (auth_service.mark_professor_verified).
+    # require_role("professor") blocks unverified professors, so a user cannot
+    # unilaterally grant themselves professor-only access.
     current_user.is_verified = body.role == "student"
     db.add(current_user)
     await db.commit()

@@ -1,7 +1,9 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
+from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models.user import User
@@ -63,7 +65,25 @@ async def refresh(
 @router.post("/logout", status_code=204, summary="Revoke all of the caller's refresh tokens", responses=errors(401, 429))
 async def logout(
     request: Request,
+    authorization: str | None = Header(None),
     current_user: User = Depends(get_current_user),
 ):
-    await auth_service.revoke_all_refresh_tokens(current_user.id, request.app.state.redis)
+    redis = request.app.state.redis
+    await auth_service.revoke_all_refresh_tokens(current_user.id, redis)
+    # Also denylist the presented access token's jti so it can't be used for the
+    # remainder of its 15-minute TTL after logout.
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ")
+        try:
+            payload = jwt.decode(
+                token,
+                settings.jwt_public_key,
+                algorithms=["RS256"],
+                audience=auth_service.JWT_AUDIENCE,
+                issuer=auth_service.JWT_ISSUER,
+            )
+        except JWTError:
+            payload = None
+        if payload is not None:
+            await auth_service.add_access_token_to_denylist(payload, redis)
     return None

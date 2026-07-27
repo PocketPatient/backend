@@ -279,6 +279,24 @@ def test_initiate_case_skips_on_http_exception():
         mock_push.delay.assert_not_called()
 
 
+def test_initiate_case_reraises_non_422_http_exception():
+    """A gateway 502 during opening-message generation must NOT be swallowed as a
+    routine skip — it should propagate so Celery can retry."""
+    from fastapi import HTTPException
+
+    with patch("app.tasks.case_initiation.run_task_async") as mock_run, \
+         patch("app.tasks.case_initiation._check_and_create", MagicMock(return_value="coro-sentinel")), \
+         patch("app.tasks.case_initiation.send_push") as mock_push:
+        mock_run.side_effect = HTTPException(status_code=502, detail="LLM gateway error")
+
+        from app.tasks.case_initiation import initiate_case
+        with pytest.raises(HTTPException) as exc_info:
+            initiate_case(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        assert exc_info.value.status_code == 502
+        mock_push.delay.assert_not_called()
+
+
 def test_initiate_case_skips_on_integrity_error():
     from sqlalchemy.exc import IntegrityError
 

@@ -127,6 +127,15 @@ async def update_course(
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(course, field, value)
 
+    # Validate the MERGED messaging window: a partial update (only start or only
+    # end supplied) can otherwise persist an inverted window that silently stops
+    # case initiation. The schema validator only covers the both-present case.
+    if course.msg_window_start >= course.msg_window_end:
+        raise HTTPException(
+            status_code=422,
+            detail="msg_window_start must be before msg_window_end",
+        )
+
     await db.commit()
     await db.refresh(course)
     count = await _count_students(db, course.id)

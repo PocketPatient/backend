@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from app.services.disease_parser import (
@@ -231,3 +233,89 @@ def test_parse_csv_empty_string_returns_empty_result():
     result = parse_csv("")
     assert result.units == []
     assert result.errors == []
+
+
+def test_parse_non_utf8_returns_parse_error():
+    # Latin-1 / Windows-1252 encoded bytes with a non-ASCII byte (0xe9 = é)
+    # are not valid UTF-8 and must surface as a parse error, not a 500.
+    raw = '{"units": []}'.encode("utf-8").replace(b"units", b"unit\xe9")
+    result = parse("doc.json", raw)
+    assert result.units == []
+    assert len(result.errors) == 1
+    assert result.errors[0].location == "<root>"
+    assert "UTF-8" in result.errors[0].message
+
+
+def test_parse_utf16_returns_parse_error():
+    result = parse("doc.json", VALID_JSON.encode("utf-16"))
+    assert result.units == []
+    assert any("UTF-8" in e.message for e in result.errors)
+
+
+def test_parse_json_over_length_name_is_error():
+    long_name = "X" * 256  # Disease.name is String(255)
+    text = json.dumps(
+        {
+            "units": [
+                {
+                    "label": "U",
+                    "diseases": [
+                        {
+                            "name": long_name,
+                            "category": "C",
+                            "key_symptoms": ["s"],
+                            "differentials": ["d"],
+                            "difficulty_tier": 1,
+                            "speech_style": "flat",
+                            "nudge_behavior": {"frequency": "low", "tone": "flat", "example": ""},
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    result = parse_json(text)
+    assert any("name" in e.location and "maximum length" in e.message for e in result.errors)
+    assert result.units[0].diseases == []
+
+
+def test_parse_json_over_length_dsm_code_is_error():
+    text = json.dumps(
+        {
+            "units": [
+                {
+                    "label": "U",
+                    "diseases": [
+                        {
+                            "name": "X",
+                            "dsm_code": "F" * 21,  # String(20)
+                            "category": "C",
+                            "key_symptoms": ["s"],
+                            "differentials": ["d"],
+                            "difficulty_tier": 1,
+                            "speech_style": "flat",
+                            "nudge_behavior": {"frequency": "low", "tone": "flat", "example": ""},
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    result = parse_json(text)
+    assert any("dsm_code" in e.location and "maximum length" in e.message for e in result.errors)
+
+
+def test_parse_json_over_length_unit_label_is_error():
+    text = json.dumps({"units": [{"label": "U" * 101, "diseases": []}]})
+    result = parse_json(text)
+    assert any("label" in e.location and "maximum length" in e.message for e in result.errors)
+    assert result.units == []
+
+
+def test_parse_csv_over_length_category_is_error():
+    text = (
+        "unit_label,disease_name,dsm_code,category,key_symptoms,differentials,difficulty_tier,speech_style,nudge_frequency,nudge_tone,nudge_example\n"
+        f"Unit 1,X,F1,{'C' * 101},a;b,c;d,1,flat,low,flat,ex\n"
+    )
+    result = parse_csv(text)
+    assert any("category" in e.location and "maximum length" in e.message for e in result.errors)

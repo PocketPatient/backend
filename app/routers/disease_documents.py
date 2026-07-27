@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from pathlib import PurePath
+from pathlib import Path, PurePath
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -89,8 +90,20 @@ async def upload_disease_document(
         version=next_version,
     )
     db.add(doc)
-    await db.commit()
-    await db.refresh(doc)
+    try:
+        await db.commit()
+        await db.refresh(doc)
+    except IntegrityError:
+        # A concurrent upload committed this (course_id, version) first. The
+        # computed next_version is an unlocked read, so the UniqueConstraint
+        # can collide. Roll back, remove the orphan file we just wrote, and
+        # signal a retryable conflict instead of a 500.
+        await db.rollback()
+        Path(file_url).unlink(missing_ok=True)
+        raise HTTPException(
+            status_code=409,
+            detail="Version conflict from a concurrent upload; please retry",
+        )
 
     diff: DiffSummary | None = None
     if max_version >= 1:

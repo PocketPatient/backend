@@ -17,6 +17,7 @@ from app import config as app_config
 from app.database import Base, get_db
 from app.main import app
 from app.models.user import User, UserRole
+from app.services.auth_service import JWT_AUDIENCE, JWT_ISSUER
 
 TEST_DATABASE_URL = os.getenv(
     "TEST_DATABASE_URL",
@@ -82,7 +83,11 @@ async def client(rsa_keys, test_db):
             yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    app.state.redis = AsyncMock()
+    redis_mock = AsyncMock()
+    # Denylist check calls redis.exists(); a bare AsyncMock returns a truthy value,
+    # which would make get_current_user treat every token as revoked (401).
+    redis_mock.exists = AsyncMock(return_value=0)
+    app.state.redis = redis_mock
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac
@@ -127,7 +132,11 @@ async def clean_tables(test_db):
 
 
 def _make_token(user_id: uuid.UUID, private_pem: str) -> str:
-    return jwt.encode({"sub": str(user_id)}, private_pem, algorithm="RS256")
+    return jwt.encode(
+        {"sub": str(user_id), "iss": JWT_ISSUER, "aud": JWT_AUDIENCE},
+        private_pem,
+        algorithm="RS256",
+    )
 
 
 @pytest_asyncio.fixture
@@ -139,7 +148,7 @@ async def professor(db_session, rsa_keys):
         google_uid=f"prof-{uuid.uuid4().hex}",
         email=f"professor-{uuid.uuid4().hex[:8]}@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
         display_name="Test Professor",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),

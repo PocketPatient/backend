@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -130,3 +131,62 @@ def test_logout_revokes_all_refresh_tokens(client):
 def test_logout_requires_auth(client):
     resp = client.post("/api/v1/auth/logout")
     assert resp.status_code == 401
+
+
+def test_logout_denylists_access_token_jti(client):
+    """Logout adds the presented access token's jti to the Redis denylist (finding 2)."""
+    from app import config as app_config
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa as _rsa
+    from jose import jwt as _jwt
+
+    from app.services.auth_service import JWT_AUDIENCE, JWT_ISSUER
+
+    priv = _rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv_pem = priv.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+    pub_pem = priv.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+    user = make_user()
+    user.role = UserRole.student
+    now = int(datetime.now(timezone.utc).timestamp())
+    token = _jwt.encode(
+        {
+            "sub": str(user.id),
+            "jti": "logout-jti",
+            "iss": JWT_ISSUER,
+            "aud": JWT_AUDIENCE,
+            "exp": now + 600,
+        },
+        priv_pem,
+        algorithm="RS256",
+    )
+
+    redis = AsyncMock()
+    redis.smembers = AsyncMock(return_value=set())
+    app.state.redis = redis
+
+    orig_pub = app_config.settings.jwt_public_key
+    app_config.settings.jwt_public_key = pub_pem
+    from app.deps import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: user
+    try:
+        resp = client.post(
+            "/api/v1/auth/logout", headers={"Authorization": f"Bearer {token}"}
+        )
+    finally:
+        app_config.settings.jwt_public_key = orig_pub
+        app.dependency_overrides.pop(get_current_user, None)
+
+    assert resp.status_code == 204
+    denylist_calls = [
+        c for c in redis.setex.await_args_list
+        if c.args and c.args[0] == "denylist:logout-jti"
+    ]
+    assert denylist_calls, "expected the access token jti to be denylisted"

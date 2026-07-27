@@ -164,6 +164,27 @@ def test_set_role_already_set_returns_409():
     assert response.status_code == 409
 
 
+def test_self_assigned_professor_blocked_from_professor_endpoint():
+    """End-to-end (finding 1): a user who self-assigns 'professor' via
+    PUT /users/me/role gets is_verified=False and is rejected (403) by a real
+    professor-only endpoint through require_role."""
+    user = make_user(role=UserRole.professor, is_verified=False)
+
+    async def _override_user():
+        return user
+
+    app.state.redis = AsyncMock()
+    app.dependency_overrides[get_current_user] = _override_user
+
+    client = TestClient(app)
+    # DELETE /courses/{id}/deactivate is guarded by require_role("professor").
+    resp = client.delete(f"/api/v1/courses/{uuid.uuid4()}/deactivate")
+
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+
+
 def test_set_role_invalid_value_returns_422():
     user = make_user(role=None)
 

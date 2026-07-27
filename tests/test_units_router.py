@@ -10,6 +10,7 @@ from jose import jwt
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
+from tests.conftest import _make_token
 from app.models.unit import Unit, UnitStatus
 from app.models.user import User, UserRole
 
@@ -132,14 +133,14 @@ async def test_list_units_professor_not_owner_returns_404(client, setup, db_sess
         google_uid=f"p2-{uuid.uuid4().hex}",
         email=f"p2-{uuid.uuid4().hex[:8]}@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
         display_name="Other",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
     )
     db_session.add(other_prof)
     await db_session.commit()
-    other_token = jwt.encode({"sub": str(other_prof.id)}, private_pem, algorithm="RS256")
+    other_token = _make_token(other_prof.id, private_pem)
 
     resp = await client.get(
         f"/api/v1/courses/{course.id}/units",
@@ -162,7 +163,7 @@ async def test_list_units_student_not_enrolled_returns_404(client, setup, db_ses
     )
     db_session.add(other_stu)
     await db_session.commit()
-    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    other_token = _make_token(other_stu.id, private_pem)
 
     resp = await client.get(
         f"/api/v1/courses/{course.id}/units",

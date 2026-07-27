@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, require_role
 from app.openapi import errors
@@ -59,15 +60,13 @@ def _session_out(
         status=session.status,
         turn_count=session.turn_count,
         started_at=session.started_at,
+        # Internal guardrail audit rows (role=system) are never exposed to
+        # students/professors — they would leak that the patient nearly broke
+        # character or leaked the diagnosis.
         messages=[
-            MessageOut(
-                id=m.id,
-                role=m.role,
-                content=m.content,
-                sent_at=m.sent_at,
-                response_latency_sec=m.response_latency_sec,
-            )
+            MessageOut.model_validate(m)
             for m in messages
+            if m.role != MessageRole.system
         ],
         score=score,
         reveal=reveal,
@@ -112,7 +111,7 @@ async def get_active_session_endpoint(
     return _session_out(session, messages)
 
 
-@router.get("", response_model=PaginatedSessions, summary="List the caller's sessions (paginated)", responses=errors(401, 429))
+@router.get("", response_model=PaginatedSessions, summary="List the caller's sessions (paginated)", responses=errors(401, 404, 429))
 async def list_sessions(
     course_id: uuid.UUID,
     status: SessionStatus | None = None,
@@ -181,7 +180,7 @@ async def get_session(
     return _session_out(session, messages, score_out, reveal)
 
 
-@router.post("/{session_id}/messages", response_model=MessageOut, status_code=202, summary="Send a message to the patient", responses=errors(401, 403, 404, 422, 429))
+@router.post("/{session_id}/messages", response_model=MessageOut, status_code=202, summary="Send a message to the patient", responses=errors(401, 403, 404, 409, 422, 429))
 async def send_message(
     session_id: uuid.UUID,
     body: MessageCreate,
@@ -202,17 +201,14 @@ async def send_message(
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=409, detail="Session is not active")
 
-    student_msg = await handle_student_message(session, body.content, instant, db)
-    return MessageOut(
-        id=student_msg.id,
-        role=student_msg.role,
-        content=student_msg.content,
-        sent_at=student_msg.sent_at,
-        response_latency_sec=student_msg.response_latency_sec,
-    )
+    # `instant` skips the realistic reply delay (anti-cheat pacing). Never honor
+    # it from untrusted callers in production — only when test accounts are enabled.
+    effective_instant = instant and settings.allow_test_accounts
+    student_msg = await handle_student_message(session, body.content, effective_instant, db)
+    return MessageOut.model_validate(student_msg)
 
 
-@router.post("/{session_id}/diagnose", response_model=DiagnosisResult, summary="Submit a diagnosis", responses=errors(401, 403, 404, 422, 429))
+@router.post("/{session_id}/diagnose", response_model=DiagnosisResult, summary="Submit a diagnosis", responses=errors(401, 403, 404, 409, 422, 429))
 async def diagnose(
     session_id: uuid.UUID,
     body: DiagnosisCreate,
@@ -263,21 +259,11 @@ async def diagnose(
     await invalidate(redis, summary_key(current_user.id, session.course_id))
     await invalidate(redis, class_summary_key(session.course_id))
 
-    unit = (
-        await db.execute(select(Unit).where(Unit.id == disease.unit_id))
-    ).scalar_one()
-    return DiagnosisResult(
-        correct=True,
-        score=ScoreOut.model_validate(score),
-        reveal=RevealOut(
-            disease_name=disease.name,
-            dsm_code=disease.dsm_code,
-            unit_label=unit.label,
-        ),
-    )
+    score_out, reveal = await _load_reveal(session, db)
+    return DiagnosisResult(correct=True, score=score_out, reveal=reveal)
 
 
-@router.post("", response_model=SessionOut, status_code=201, summary="Start a new session", responses=errors(401, 403, 404, 422, 429))
+@router.post("", response_model=SessionOut, status_code=201, summary="Start a new session", responses=errors(401, 403, 404, 409, 422, 429))
 async def create_session(
     body: SessionCreate,
     current_user: User = Depends(require_role("student")),

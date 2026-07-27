@@ -10,6 +10,7 @@ import pytest_asyncio
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
+from tests.conftest import _make_token
 from app.models.message import Message, MessageRole
 from app.models.score import Score
 from app.models.session import Session, SessionStatus
@@ -121,7 +122,7 @@ async def test_create_session_not_enrolled_returns_404(client, setup, db_session
     await db_session.commit()
 
     from jose import jwt
-    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    other_token = _make_token(other_stu.id, private_pem)
 
     resp = await client.post(
         "/api/v1/sessions",
@@ -220,6 +221,74 @@ async def test_get_session_includes_patient_persona(client, setup):
     assert data["patient_gender"] in {"male", "female"}
 
 
+async def test_get_session_excludes_system_audit_messages(client, setup, db_session):
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active,
+    )
+    db_session.add(session)
+    await db_session.flush()
+
+    db_session.add(Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi doc.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    ))
+    # Internal guardrail audit row — must never be exposed to the student.
+    db_session.add(Message(
+        session_id=session.id, role=MessageRole.system,
+        content="[regenerated: diagnosis_leak]",
+        sent_at=datetime.now(timezone.utc), is_nudge=False,
+    ))
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/v1/sessions/{session.id}",
+        headers={"Authorization": f"Bearer {stu_token}"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    roles = [m["role"] for m in data["messages"]]
+    assert "system" not in roles
+    contents = [m["content"] for m in data["messages"]]
+    assert all("diagnosis_leak" not in c for c in contents)
+    assert len(data["messages"]) == 1
+
+
+async def test_send_message_instant_ignored_when_test_accounts_disabled(client, setup, db_session):
+    from app.routers import sessions as sessions_router
+
+    _, _, stu, stu_token, course, disease = setup
+
+    session = Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.active, turn_count=0,
+    )
+    db_session.add(session)
+    await db_session.flush()
+    db_session.add(Message(
+        session_id=session.id, role=MessageRole.patient,
+        content="Hi.", sent_at=datetime.now(timezone.utc), is_nudge=False,
+    ))
+    await db_session.commit()
+
+    # With test accounts disabled, an untrusted caller's ?instant=true must be
+    # ignored: the realistic reply delay (eta) is still enforced.
+    with patch.object(sessions_router.settings, "allow_test_accounts", False), \
+         patch("app.services.session_service.celery"), \
+         patch("app.tasks.bot_reply.generate_and_send_reply") as mock_task:
+        resp = await client.post(
+            f"/api/v1/sessions/{session.id}/messages?instant=true",
+            json={"content": "How are you?"},
+            headers={"Authorization": f"Bearer {stu_token}"},
+        )
+
+    assert resp.status_code == 202
+    mock_task.apply_async.assert_called_once()
+    assert "eta" in mock_task.apply_async.call_args.kwargs
+
+
 async def test_get_session_by_id_professor_of_course(client, setup, db_session):
     prof, prof_token, stu, _, course, disease = setup
 
@@ -259,7 +328,7 @@ async def test_get_session_by_id_unauthorized_user_returns_404(client, setup, db
     await db_session.commit()
 
     from jose import jwt
-    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    other_token = _make_token(other_stu.id, private_pem)
     resp = await client.get(
         f"/api/v1/sessions/{session.id}",
         headers={"Authorization": f"Bearer {other_token}"},
@@ -445,7 +514,7 @@ async def test_send_message_not_owner_returns_404(client, setup, db_session, rsa
     await db_session.commit()
 
     from jose import jwt
-    other_token = jwt.encode({"sub": str(other_stu.id)}, private_pem, algorithm="RS256")
+    other_token = _make_token(other_stu.id, private_pem)
     resp = await client.post(
         f"/api/v1/sessions/{session.id}/messages",
         json={"content": "Hello"},
@@ -587,7 +656,7 @@ async def test_diagnose_not_owner_returns_404(client, setup, db_session, rsa_key
     session = await _seed_active_session(db_session, stu, course, disease)
 
     from jose import jwt
-    token = jwt.encode({"sub": str(other.id)}, private_pem, algorithm="RS256")
+    token = _make_token(other.id, private_pem)
     resp = await client.post(
         f"/api/v1/sessions/{session.id}/diagnose",
         json=_diag_body(),

@@ -111,7 +111,7 @@ async def test_upload_by_non_owner_professor_returns_404(client, professor, rsa_
         google_uid=f"otherprof-{_uuid.uuid4().hex}",
         email=f"otherprof-{_uuid.uuid4().hex[:8]}@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
         display_name="Other Prof",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -174,6 +174,68 @@ async def test_upload_with_parse_errors_returns_200_with_errors(client, professo
     body = resp.json()
     assert len(body["errors"]) >= 1
     assert body["units"][0]["disease_count"] == 1
+
+
+async def test_upload_duplicate_version_returns_409_not_500(client, professor, monkeypatch):
+    _, token = professor
+    user, _ = professor
+    course = await _create_course(client, token)
+
+    from app.services import file_storage as fs
+
+    real_save = fs.save_upload
+    written_paths: list[str] = []
+
+    def racing_save(course_id, version, ext, raw):
+        # Simulate a concurrent uploader committing this (course_id, version)
+        # first, from an independent connection/transaction, right before our
+        # request commits — forcing the UniqueConstraint to collide.
+        import asyncio
+        import threading
+
+        from app.models.disease_document import DiseaseDocument
+
+        def _run():
+            async def _do():
+                eng = create_async_engine(TEST_DATABASE_URL, echo=False)
+                sf = async_sessionmaker(eng, expire_on_commit=False)
+                async with sf() as s:
+                    s.add(
+                        DiseaseDocument(
+                            course_id=course_id,
+                            uploaded_by=user.id,
+                            file_url="conflicting-row",
+                            version=version,
+                        )
+                    )
+                    await s.commit()
+                await eng.dispose()
+
+            asyncio.run(_do())
+
+        t = threading.Thread(target=_run)
+        t.start()
+        t.join()
+
+        path = real_save(course_id, version, ext, raw)
+        written_paths.append(path)
+        return path
+
+    monkeypatch.setattr(
+        "app.routers.disease_documents.file_storage.save_upload", racing_save
+    )
+
+    files = {"file": ("doc.json", _sample_bytes(), "application/json")}
+    resp = await client.post(
+        f"/api/v1/courses/{course['id']}/disease-document",
+        files=files,
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 409, resp.text
+
+    # The just-written orphan file must have been cleaned up.
+    assert written_paths, "save_upload should have been called"
+    assert not Path(written_paths[0]).exists()
 
 
 async def test_upload_second_time_increments_version(client, professor):

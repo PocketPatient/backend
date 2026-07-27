@@ -4,7 +4,8 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, time, timezone
+from datetime import datetime, time
+from zoneinfo import ZoneInfo
 
 from firebase_admin import messaging
 from sqlalchemy import select, update
@@ -16,6 +17,12 @@ from app.services import push_service
 from app.tasks._run import run_task_async
 
 logger = logging.getLogger(__name__)
+
+# Quiet hours are stored as LOCAL wall-clock times but there is no per-user
+# timezone column, so we interpret them in a single app-wide timezone (the
+# Rutgers campus tz). TODO(follow-up): add a per-user timezone and use it here —
+# this single-campus assumption is wrong for students in other timezones.
+APP_TIMEZONE = ZoneInfo("America/New_York")
 
 
 @dataclass
@@ -72,7 +79,10 @@ def send_push(self, user_id: str, title: str, body: str, data: dict[str, str]):
         return
 
     if state.quiet_hours_start is not None and state.quiet_hours_end is not None:
-        now = datetime.now(timezone.utc)
+        # Compare against local wall-clock time, since quiet hours are stored as
+        # local times (see APP_TIMEZONE). next_window_open then reschedules to the
+        # correct local instant (the returned datetime is tz-aware).
+        now = datetime.now(APP_TIMEZONE)
         if push_service.is_within_quiet_hours(
             now, state.quiet_hours_start, state.quiet_hours_end
         ):

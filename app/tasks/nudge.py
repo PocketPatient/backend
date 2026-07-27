@@ -13,6 +13,7 @@ from app.tasks._run import run_task_async
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
+from app.services.character_guardrail import generate_in_character
 from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
 from app.tasks.push_notifications import send_push
@@ -54,6 +55,9 @@ async def _fetch_eligible_session_ids(db: AsyncSession) -> list[uuid.UUID]:
 
 
 async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
+    # TODO(perf): ~4 sequential queries per session (session, last message, last
+    # nudge, disease) — an N+1 across the eligible set. Batch/join if the eligible
+    # count grows; kept simple here to avoid risking the per-session gating logic.
     session = (
         await db.execute(select(Session).where(Session.id == session_id))
     ).scalar_one_or_none()
@@ -98,7 +102,15 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
 
     hours = round((now - _aware(last_message.sent_at)).total_seconds() / 3600)
     patient_name, patient_age, _ = patient_identity(session.id.int)
-    text = await gateway.generate_nudge_message(disease, patient_name, patient_age, hours)
+    # Route the nudge through the character guardrail (same as openers/replies) so
+    # a nudge that names the diagnosis or breaks character is regenerated/suppressed
+    # rather than delivered verbatim.
+    text = await generate_in_character(
+        lambda: gateway.generate_nudge_message(disease, patient_name, patient_age, hours),
+        disease_name=disease.name,
+        db=db,
+        session_id=session.id,
+    )
 
     db.add(Message(
         session_id=session.id,

@@ -172,7 +172,7 @@ async def test_update_course_wrong_owner_returns_404(client, professor, rsa_keys
         google_uid=f"other2-{uuid.uuid4().hex}",
         email=f"other2-{uuid.uuid4().hex[:8]}@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
         display_name="Other Prof",
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
@@ -306,3 +306,86 @@ async def test_create_course_rejects_missing_title(client, clean_tables, profess
         headers={"Authorization": f"Bearer {token}"},
     )
     assert resp.status_code == 422
+
+
+async def test_update_course_strips_html_from_title(client, clean_tables, professor):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Clean Title"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"title": "<img src=x onerror=alert(1)>Pwned"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    title = resp.json()["title"]
+    assert "<img" not in title
+    assert "onerror" not in title
+    assert title == "Pwned"
+
+
+async def test_update_course_strips_html_from_semester(client, clean_tables, professor):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Course"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create.json()["id"]
+
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"semester": "<b>Fall</b> 2026"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["semester"] == "Fall 2026"
+
+
+async def test_create_course_strips_html_from_semester(client, clean_tables, professor):
+    _, token = professor
+    resp = await client.post(
+        "/api/v1/courses",
+        json={"title": "Course", "semester": "<script>x</script>Spring"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 201
+    assert "<script>" not in resp.json()["semester"]
+
+
+async def test_partial_update_inverted_window_returns_422(client, clean_tables, professor):
+    _, token = professor
+    create = await client.post(
+        "/api/v1/courses",
+        json={"title": "Psych 101"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    course_id = create.json()["id"]
+
+    # Set a valid window first (default is 08:00-22:00).
+    ok = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"msg_window_start": "09:00:00", "msg_window_end": "22:00:00"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert ok.status_code == 200
+
+    # Partial update of ONLY the start, past the stored end (22:00) -> inverted.
+    resp = await client.put(
+        f"/api/v1/courses/{course_id}",
+        json={"msg_window_start": "23:00:00"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 422
+
+    # And confirm the stored window was NOT mutated to the inverted value.
+    get_resp = await client.get(
+        f"/api/v1/courses/{course_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert get_resp.json()["msg_window_start"] == "09:00:00"

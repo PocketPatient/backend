@@ -41,6 +41,10 @@ def compute_response_time_score(avg_latency_sec: float | None) -> float:
 def _build_transcript(messages: list[Message]) -> str:
     lines = []
     for m in messages:
+        # Internal guardrail audit rows (role=system) are not part of the
+        # student/patient dialogue and must not pollute the grading prompt.
+        if m.role == MessageRole.system:
+            continue
         speaker = "Student" if m.role == MessageRole.student else "Patient"
         lines.append(f"{speaker}: {m.content}")
     return "\n".join(lines)

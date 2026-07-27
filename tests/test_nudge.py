@@ -215,6 +215,26 @@ async def test_saves_nudge_message_and_dispatches_matching_push(nudge_setup, db_
     assert push_args[3]["session_id"] == str(session.id)
 
 
+async def test_nudge_leaking_disease_name_is_suppressed(nudge_setup, db_session):
+    """A nudge whose raw LLM output names the diagnosis must be regenerated/
+    suppressed by the character guardrail, not delivered verbatim."""
+    from app.services.character_guardrail import FALLBACK_TEXT
+
+    prof, stu = nudge_setup
+    course, disease = await _make_course_with_disease(db_session, prof, stu, frequency="high")
+    session = await _make_session(db_session, stu, course, disease, last_message_hours_ago=25)
+
+    leaking = f"Doctor, I'm sure this is {disease.name}. Please respond."
+    _, mock_push = await _run_check(db_session, gateway_text=leaking)
+
+    nudges = await _nudge_messages(db_session, session.id)
+    assert len(nudges) == 1
+    # The disease name must not reach the student; the guardrail falls back.
+    assert disease.name not in nudges[0].content
+    assert nudges[0].content == FALLBACK_TEXT
+    mock_push.delay.assert_called_once()
+
+
 async def test_one_session_failing_does_not_abort_the_rest(nudge_setup, db_session):
     """A transient LLM failure on one eligible session must not prevent nudges
     for the others — each session is committed and pushed independently."""

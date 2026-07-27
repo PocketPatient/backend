@@ -19,7 +19,7 @@ from app.schemas.enrollment import EnrolledStudentOut, EnrollmentJoinRequest
 router = APIRouter(tags=["enrollments"])
 
 
-@router.post("/enrollments/join", response_model=CourseOut, summary="Join a course by class code", responses=errors(401, 403, 404, 422, 429))
+@router.post("/enrollments/join", response_model=CourseOut, summary="Join a course by class code", responses=errors(401, 403, 404, 409, 410, 422, 429))
 async def join_course(
     body: EnrollmentJoinRequest,
     current_user: User = Depends(require_role("student")),

@@ -266,7 +266,7 @@ async def test_class_summary_unowned_course_404(
         google_uid=f"p-{uuid.uuid4().hex}",
         email="other@test.edu",
         role=UserRole.professor,
-        is_verified=False,
+        is_verified=True,
     )
     db_session.add(other)
     await db_session.commit()

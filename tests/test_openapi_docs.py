@@ -56,6 +56,29 @@ def test_protected_routes_declare_401():
     assert not missing, f"protected routes missing 401 response: {missing}"
 
 
+def _responses_for(path, method):
+    for p, m, op in _operations():
+        if p == path and m == method:
+            return set(op.get("responses", {}).keys())
+    raise AssertionError(f"operation not found: {method.upper()} {path}")
+
+
+@pytest.mark.parametrize(
+    "path, method, code",
+    [
+        ("/api/v1/sessions/{session_id}/messages", "post", "409"),
+        ("/api/v1/sessions/{session_id}/diagnose", "post", "409"),
+        ("/api/v1/sessions", "post", "409"),
+        ("/api/v1/sessions", "get", "404"),
+        ("/api/v1/enrollments/join", "post", "410"),
+    ],
+)
+def test_endpoint_declares_raised_error_code(path, method, code):
+    assert code in _responses_for(path, method), (
+        f"{method.upper()} {path} must declare {code}"
+    )
+
+
 # Core response models that must carry a description and an example.
 _CORE_SCHEMAS = [
     "CourseOut",
