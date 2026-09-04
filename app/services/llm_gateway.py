@@ -53,7 +53,7 @@ def patient_identity(session_id_int: int) -> tuple[str, int, str]:
 class LLMGateway:
     def __init__(self) -> None:
         self.client = genai.Client(api_key=settings.gemini_api_key)
-        self.model = "gemini-2.5-flash"
+        self.model = "gemini-3.8-flash"
 
     def _gen_config(self, system_prompt: str) -> GenerateContentConfig:
         # gemini-2.5-flash is a thinking model; with a low token cap the
