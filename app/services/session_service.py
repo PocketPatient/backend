@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -193,7 +194,7 @@ async def handle_student_message(
 
     if session.pending_reply_task_id:
         try:
-            celery.control.revoke(session.pending_reply_task_id)
+            await run_in_threadpool(celery.control.revoke, session.pending_reply_task_id)
         except Exception:
             pass
 
@@ -209,6 +210,7 @@ async def handle_student_message(
     if not instant:
         delay = _reply_delay_seconds(disease.speech_style)
         dispatch_kwargs["eta"] = datetime.now(timezone.utc) + timedelta(seconds=delay)
-    generate_and_send_reply.apply_async(**dispatch_kwargs)
+    # Broker publish is a blocking Redis call; keep it off the event loop.
+    await run_in_threadpool(lambda: generate_and_send_reply.apply_async(**dispatch_kwargs))
 
     return student_msg

@@ -42,3 +42,47 @@ def test_upload_exists_true_after_save(tmp_upload_root):
 
 def test_upload_exists_false_for_missing(tmp_upload_root):
     assert file_storage.upload_exists(str(tmp_upload_root / "nope.json")) is False
+
+
+# ── GCS backend (production) ──────────────────────────────────────────────────
+
+@pytest.fixture
+def fake_gcs(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.config import settings
+
+    objects: dict[str, bytes] = {}
+
+    def blob_for(bucket_name):
+        def _blob(name):
+            key = f"{bucket_name}/{name}"
+            blob = MagicMock()
+            blob.upload_from_string.side_effect = lambda raw: objects.__setitem__(key, raw)
+            blob.download_as_bytes.side_effect = lambda: objects[key]
+            blob.exists.side_effect = lambda: key in objects
+            blob.delete.side_effect = lambda: objects.pop(key)
+            return blob
+        return _blob
+
+    client = MagicMock()
+    client.bucket.side_effect = lambda b: MagicMock(blob=blob_for(b))
+    monkeypatch.setattr(file_storage, "_gcs_client", lambda: client)
+    monkeypatch.setattr(settings, "gcs_upload_bucket", "pp-uploads")
+    return objects
+
+
+def test_gcs_round_trip(fake_gcs):
+    course_id = uuid.uuid4()
+    url = file_storage.save_upload(course_id, 3, "json", b"payload")
+    assert url == f"gs://pp-uploads/disease-documents/{course_id}/3.json"
+    assert file_storage.upload_exists(url) is True
+    assert file_storage.read_upload(url) == b"payload"
+    file_storage.delete_upload(url)
+    assert file_storage.upload_exists(url) is False
+
+
+def test_local_paths_still_readable_when_bucket_configured(fake_gcs, tmp_path):
+    local = tmp_path / "old.json"
+    local.write_bytes(b"legacy")
+    assert file_storage.read_upload(str(local)) == b"legacy"

@@ -24,6 +24,13 @@ register_slow_query_logging(engine.sync_engine)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from app.services.firebase import init_firebase
+    # Refuse to serve in production with missing/malformed secrets; uvicorn
+    # exits non-zero, so the Cloud Run revision fails to become ready.
+    settings.validate_for_runtime("api")
+    if settings.allow_non_rutgers_accounts:
+        logging.getLogger("pocketpatient").warning(
+            "ALLOW_NON_RUTGERS_ACCOUNTS is enabled: any verified email can sign up"
+        )
     init_firebase()
     app.state.redis = aioredis.from_url(settings.redis_url, decode_responses=True)
     yield
@@ -36,7 +43,7 @@ app = FastAPI(
     description=(
         "Backend for PocketPatient, a psychiatry-training app where students "
         "message AI 'patients' assigned by their professor. Authenticate with a "
-        "Google sign-in, exchange it for an RS256 JWT at `/api/v1/auth/login`, "
+        "Firebase sign-in (Google, email/password, or Apple), exchange its ID token for an RS256 JWT at `/api/v1/auth/login`, "
         "and send it as `Authorization: Bearer <token>`. Errors use a standard "
         "`{detail, code}` envelope. See `docs/api-guide.md` for the full guide."
     ),

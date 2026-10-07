@@ -3,9 +3,10 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from pathlib import Path, PurePath
+from pathlib import PurePath
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,7 +82,8 @@ async def upload_disease_document(
     ).scalar_one()
     next_version = max_version + 1
 
-    file_url = file_storage.save_upload(course.id, next_version, ext, raw)
+    # Storage I/O may be a GCS network call: keep it off the event loop.
+    file_url = await run_in_threadpool(file_storage.save_upload, course.id, next_version, ext, raw)
 
     doc = DiseaseDocument(
         course_id=course.id,
@@ -99,7 +101,7 @@ async def upload_disease_document(
         # can collide. Roll back, remove the orphan file we just wrote, and
         # signal a retryable conflict instead of a 500.
         await db.rollback()
-        Path(file_url).unlink(missing_ok=True)
+        await run_in_threadpool(file_storage.delete_upload, file_url)
         raise HTTPException(
             status_code=409,
             detail="Version conflict from a concurrent upload; please retry",
@@ -180,10 +182,10 @@ async def confirm_disease_document(
     if doc is None:
         raise HTTPException(status_code=404, detail="No pending upload to confirm")
 
-    if not file_storage.upload_exists(doc.file_url):
+    if not await run_in_threadpool(file_storage.upload_exists, doc.file_url):
         raise HTTPException(status_code=410, detail="Upload file expired, please re-upload")
 
-    raw = file_storage.read_upload(doc.file_url)
+    raw = await run_in_threadpool(file_storage.read_upload, doc.file_url)
     filename = f"doc.{doc.file_url.rsplit('.', 1)[-1]}"
     parse_result = disease_parser.parse(filename, raw)
 

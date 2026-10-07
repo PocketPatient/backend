@@ -8,6 +8,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from app.config import settings
+
 _AUTH_PREFIX = "/api/v1/auth"
 _ANALYTICS_PREFIX = "/api/v1/analytics"
 _MESSAGE_RE = re.compile(r"^/api/v1/sessions/[^/]+/messages/?$")
@@ -18,11 +20,6 @@ _ANALYTICS_LIMIT = 60
 _STANDARD_LIMIT = 100
 _WINDOW_SECONDS = 60
 
-# Number of trusted reverse proxies sitting in front of this app. Only the
-# X-Forwarded-For entries contributed by our own proxies may be trusted; the
-# client controls everything to the left of them. Default 0 = never trust XFF
-# (fail closed) so an attacker cannot forge the rate-limit key.
-_TRUSTED_PROXY_COUNT = 0
 
 
 def _socket_ip(request: Request) -> str:
@@ -34,20 +31,23 @@ def _client_ip(request: Request) -> str:
     """Best-effort client IP for rate-keying.
 
     X-Forwarded-For is honored only for the number of proxies we actually
-    operate (`_TRUSTED_PROXY_COUNT`); with the default of 0 the header is
+    operate (TRUSTED_PROXY_COUNT); with the default of 0 the header is
     ignored entirely and the socket peer is used. This prevents a client from
     minting unlimited rate-limit buckets by rotating the XFF header.
+
+    Each trusted proxy appends the address it received the request from, so
+    the Nth entry from the right was written by our outermost proxy and is the
+    real client (Cloud Run direct: N=1; behind an external HTTPS load
+    balancer, which appends "<client>, <lb>": N=2). Anything further left is
+    attacker-controlled.
     """
-    if _TRUSTED_PROXY_COUNT > 0:
+    trusted = settings.trusted_proxy_count
+    if trusted > 0:
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-            # The rightmost _TRUSTED_PROXY_COUNT entries were appended by our
-            # own proxies; the entry immediately to their left is the real
-            # client. Anything further left is attacker-controlled.
-            idx = len(parts) - _TRUSTED_PROXY_COUNT - 1
-            if 0 <= idx < len(parts):
-                return parts[idx]
+            if len(parts) >= trusted:
+                return parts[-trusted]
     return _socket_ip(request)
 
 
@@ -82,9 +82,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path.startswith(_AUTH_PREFIX):
             limit = _AUTH_LIMIT
-            # Security-sensitive brute-force bucket: key on the real socket
-            # peer only, never the client-supplied X-Forwarded-For header.
-            key = f"rl:auth:{_socket_ip(request)}"
+            # Security-sensitive brute-force bucket: key on the socket peer, or
+            # (behind Cloud Run) the XFF entry our own proxy appended — never a
+            # client-supplied XFF entry. Without TRUSTED_PROXY_COUNT on Cloud
+            # Run, every client shares the proxy's socket IP and one bucket.
+            key = f"rl:auth:{_client_ip(request)}"
         elif request.method == "POST" and _MESSAGE_RE.match(path):
             limit = _MESSAGE_LIMIT
             key = _user_key(request, "msg")

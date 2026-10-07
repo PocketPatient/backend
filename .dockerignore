@@ -1,7 +1,25 @@
+# Secrets — must never be baked into the image (inject at runtime instead)
 .env
+.env.*
+serviceAccountKey.json
+*.pem
+*.key
+
+# Local tooling / state
 .git
+.github
+.claude
+.superpowers
+.venv
+.pytest_cache
 __pycache__
 *.pyc
 *.pyo
-.pytest_cache
+
+# Not needed at runtime
 docs/
+tests/
+eval/
+scripts/
+docker-compose.yml
+docker-compose.firebase-key.yml

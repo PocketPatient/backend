@@ -1,0 +1,13 @@
+# Opt-in: mount the local Firebase service-account key the same way Cloud Run
+# mounts its secret volume. Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.firebase-key.yml up
+x-firebase-key: &firebase-key
+  environment:
+    FIREBASE_CREDENTIALS_PATH: /secrets/firebase/service-account.json
+  volumes:
+    - ./serviceAccountKey.json:/secrets/firebase/service-account.json:ro
+
+services:
+  api: *firebase-key
+  celery-worker: *firebase-key
+  celery-beat: *firebase-key

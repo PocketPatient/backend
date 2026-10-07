@@ -181,6 +181,39 @@ async def test_rate_limit_auth_ignores_rotating_xff(client_with_counting_redis):
     assert resp.json()["code"] == "RATE_LIMIT_EXCEEDED"
 
 
+@pytest.mark.asyncio
+async def test_rate_limit_trusted_proxy_keys_on_proxy_appended_ip(
+    client_with_counting_redis, monkeypatch
+):
+    """Behind Cloud Run (TRUSTED_PROXY_COUNT=1) the rightmost XFF entry is the
+    client IP appended by Google's front end: distinct clients get distinct
+    buckets, while spoofed entries to its left cannot mint new ones."""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "trusted_proxy_count", 1)
+    client = client_with_counting_redis
+    for i in range(10):
+        resp = await client.post(
+            "/api/v1/auth/login",
+            json={"firebase_id_token": "bad"},
+            headers={"X-Forwarded-For": f"10.0.0.{i}, 198.51.100.7"},
+        )
+        assert resp.status_code != 429, f"Got 429 on request {i + 1}"
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"firebase_id_token": "bad"},
+        headers={"X-Forwarded-For": "10.9.9.9, 198.51.100.7"},
+    )
+    assert resp.status_code == 429
+    # A different real client is unaffected by the first client's bucket.
+    resp = await client.post(
+        "/api/v1/auth/login",
+        json={"firebase_id_token": "bad"},
+        headers={"X-Forwarded-For": "198.51.100.8"},
+    )
+    assert resp.status_code != 429
+
+
 @pytest.fixture
 async def client_with_ttl_redis(rsa_keys, test_db):
     """Client whose Redis models a fixed-window TTL with a controllable clock.

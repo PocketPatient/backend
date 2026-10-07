@@ -1,5 +1,9 @@
 version: "3.9"
 
+# The image never contains serviceAccountKey.json. To use it locally, add
+#   -f docker-compose.firebase-key.yml
+# (otherwise set FIREBASE_PROJECT_ID only and leave FIREBASE_CREDENTIALS_PATH empty).
+
 services:
   db:
     image: postgres:16
@@ -27,14 +31,14 @@ services:
       database_url: postgresql+asyncpg://postgres:postgres@db:5432/pocketpatient
       redis_url: redis://redis:6379/0
     ports:
-      - "8000:8000"
+      - "8000:8080"
     depends_on:
       - db
       - redis
 
   celery-worker:
     build: .
-    command: uv run celery -A app.celery_app worker --loglevel=info
+    command: celery -A app.celery_app worker --loglevel=info
     restart: unless-stopped
     env_file: .env
     environment:
@@ -46,7 +50,7 @@ services:
 
   celery-beat:
     build: .
-    command: uv run celery -A app.celery_app beat --loglevel=info
+    command: celery -A app.celery_app beat --schedule=/tmp/celerybeat-schedule --loglevel=info
     restart: unless-stopped
     env_file: .env
     environment:

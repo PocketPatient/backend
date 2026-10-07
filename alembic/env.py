@@ -3,7 +3,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 
@@ -12,14 +12,21 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
+from app.config import settings  # noqa: E402
 from app.database import Base  # noqa: E402
 import app.models  # noqa: E402, F401
+
+# Use the app's DATABASE_URL (+ DB_PASSWORD) rather than alembic.ini's dev URL so
+# migrations run against Cloud SQL when executed from the production image. Passed
+# as a URL object, not via config.set_main_option, to avoid configparser '%'
+# interpolation mangling passwords.
+_db_url = settings.sqlalchemy_url
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    url = _db_url.render_as_string(hide_password=False)
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -37,11 +44,7 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = create_async_engine(_db_url, poolclass=pool.NullPool)
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()

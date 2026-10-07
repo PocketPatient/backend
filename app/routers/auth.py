@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Header, Request
+from fastapi.concurrency import run_in_threadpool
 from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,13 +38,16 @@ class TokenResponse(BaseModel):
     }
 
 
-@router.post("/login", response_model=TokenResponse, summary="Exchange Google ID token for a JWT", responses=errors(401, 422, 429))
+@router.post("/login", response_model=TokenResponse, summary="Exchange a Firebase ID token for a JWT", responses=errors(401, 403, 409, 422, 429))
 async def login(
     body: LoginRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    firebase_data = auth_service.verify_firebase_token(body.firebase_id_token)
+    # verify_id_token is sync and may fetch Google's signing certs over HTTPS.
+    firebase_data = await run_in_threadpool(
+        auth_service.verify_firebase_token, body.firebase_id_token
+    )
     user = await auth_service.get_or_create_user(db, firebase_data)
     access_token = auth_service.create_access_token(user)
     refresh_token = await auth_service.create_refresh_token(user.id, request.app.state.redis)

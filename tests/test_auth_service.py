@@ -97,6 +97,87 @@ def test_verify_firebase_token_invalid_token_raises_401():
     assert exc.value.status_code == 401
 
 
+
+def test_verify_firebase_token_apple_without_name_accepted():
+    """Apple tokens often carry no name; provider is never whitelisted."""
+    decoded = {
+        "uid": "apple-uid",
+        "email": "student@scarletmail.rutgers.edu",
+        "email_verified": True,
+        "firebase": {"sign_in_provider": "apple.com"},
+    }
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        result = verify_firebase_token("valid-token")
+    assert result["uid"] == "apple-uid"
+    assert result["name"] is None
+    assert result["sign_in_provider"] == "apple.com"
+
+
+def test_verify_firebase_token_empty_name_normalized_to_none():
+    decoded = {
+        "uid": "apple-uid",
+        "email": "student@rutgers.edu",
+        "email_verified": True,
+        "name": "",
+        "firebase": {"sign_in_provider": "apple.com"},
+    }
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        assert verify_firebase_token("valid-token")["name"] is None
+
+
+def test_verify_firebase_token_missing_email_raises_403_not_crash():
+    decoded = {"uid": "apple-uid", "firebase": {"sign_in_provider": "apple.com"}}
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        with pytest.raises(HTTPException) as exc:
+            verify_firebase_token("valid-token")
+    assert exc.value.status_code == 403
+
+
+
+@pytest.mark.parametrize(
+    "email, provider",
+    [
+        ("appreview@icloud.com", "apple.com"),
+        ("x7k2@privaterelay.appleid.com", "apple.com"),
+        ("reviewer@gmail.com", "google.com"),
+    ],
+)
+def test_allow_non_rutgers_accounts_accepts_any_verified_domain(monkeypatch, email, provider):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "allow_non_rutgers_accounts", True)
+    decoded = {
+        "uid": "reviewer-uid",
+        "email": email,
+        "email_verified": True,
+        "firebase": {"sign_in_provider": provider},
+    }
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        assert verify_firebase_token("valid-token")["email"] == email
+
+
+def test_allow_non_rutgers_accounts_still_requires_verified_email(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "allow_non_rutgers_accounts", True)
+    decoded = {"uid": "u", "email": "reviewer@gmail.com", "email_verified": False}
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        with pytest.raises(HTTPException) as exc:
+            verify_firebase_token("valid-token")
+    assert exc.value.status_code == 403
+
+
+def test_allow_non_rutgers_accounts_still_requires_an_email(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "allow_non_rutgers_accounts", True)
+    decoded = {"uid": "u", "email_verified": True, "firebase": {"sign_in_provider": "apple.com"}}
+    with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded):
+        with pytest.raises(HTTPException) as exc:
+            verify_firebase_token("valid-token")
+    assert exc.value.status_code == 403
+
+
 # ── get_or_create_user ─────────────────────────────────────────────────────────
 
 async def test_get_or_create_user_creates_new():
@@ -130,6 +211,40 @@ async def test_get_or_create_user_returns_existing():
 
     db.add.assert_not_called()
     assert user is existing
+
+
+
+async def test_get_or_create_user_concurrent_first_login_returns_winner():
+    from sqlalchemy.exc import IntegrityError
+
+    winner = User(google_uid="race-uid", email="race@rutgers.edu")
+    db = MagicMock()
+    miss, hit = MagicMock(), MagicMock()
+    miss.scalar_one_or_none.return_value = None
+    hit.scalar_one_or_none.return_value = winner
+    db.execute = AsyncMock(side_effect=[miss, hit])
+    db.commit = AsyncMock(side_effect=IntegrityError("insert", {}, Exception()))
+    db.rollback = AsyncMock()
+
+    user = await get_or_create_user(db, {"uid": "race-uid", "email": "race@rutgers.edu"})
+
+    db.rollback.assert_awaited_once()
+    assert user is winner
+
+
+async def test_get_or_create_user_email_owned_by_other_uid_raises_409():
+    from sqlalchemy.exc import IntegrityError
+
+    db = MagicMock()
+    miss = MagicMock()
+    miss.scalar_one_or_none.return_value = None
+    db.execute = AsyncMock(return_value=miss)
+    db.commit = AsyncMock(side_effect=IntegrityError("insert", {}, Exception()))
+    db.rollback = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc:
+        await get_or_create_user(db, {"uid": "apple-uid", "email": "taken@rutgers.edu"})
+    assert exc.value.status_code == 409
 
 
 # ── create_access_token ────────────────────────────────────────────────────────

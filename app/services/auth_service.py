@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from firebase_admin import auth as firebase_auth
 from jose import jwt
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -31,25 +32,37 @@ def verify_firebase_token(id_token: str) -> dict:
         decoded = firebase_auth.verify_id_token(id_token)
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid Firebase token")
-    email: str = decoded.get("email", "")
-    allowed = _RUTGERS_DOMAINS + (
-        _DEV_TEST_DOMAINS if settings.allow_test_accounts else ()
-    )
-    if not any(email.endswith(domain) for domain in allowed):
-        raise HTTPException(status_code=403, detail="Must use a Rutgers email address")
+    email: str = decoded.get("email") or ""
+    if not email:
+        # users.email is NOT NULL; e.g. Apple without the email scope.
+        raise HTTPException(status_code=403, detail="Sign-in did not provide an email address")
+    if not settings.allow_non_rutgers_accounts:
+        allowed = _RUTGERS_DOMAINS + (
+            _DEV_TEST_DOMAINS if settings.allow_test_accounts else ()
+        )
+        if not any(email.endswith(domain) for domain in allowed):
+            raise HTTPException(status_code=403, detail="Must use a Rutgers email address")
     if not decoded.get("email_verified", False):
         raise HTTPException(status_code=403, detail="Email address not verified")
     return {
         "uid": decoded["uid"],
         "email": email,
-        "name": decoded.get("name"),
+        # Optional for every provider: Apple only shares the name on first
+        # authorization (and Firebase only has it if the client set it).
+        "name": decoded.get("name") or None,
         "sign_in_provider": decoded.get("firebase", {}).get("sign_in_provider"),
     }
 
 
+async def _get_user_by_uid(db: AsyncSession, uid: str) -> User | None:
+    result = await db.execute(select(User).where(User.google_uid == uid))
+    return result.scalar_one_or_none()
+
+
 async def get_or_create_user(db: AsyncSession, firebase_data: dict) -> User:
-    result = await db.execute(select(User).where(User.google_uid == firebase_data["uid"]))
-    user = result.scalar_one_or_none()
+    # Identity is the stable Firebase UID (stored in the legacy-named google_uid
+    # column) for every provider — never the email.
+    user = await _get_user_by_uid(db, firebase_data["uid"])
     if user is None:
         user = User(
             google_uid=firebase_data["uid"],
@@ -59,7 +72,21 @@ async def get_or_create_user(db: AsyncSession, firebase_data: dict) -> User:
             is_verified=None,
         )
         db.add(user)
-        await db.commit()
+        try:
+            await db.commit()
+        except IntegrityError:
+            await db.rollback()
+            # Concurrent first login for the same UID: the other request won.
+            user = await _get_user_by_uid(db, firebase_data["uid"])
+            if user is not None:
+                return user
+            # Otherwise the email belongs to a different Firebase UID, e.g. the
+            # same address used with another sign-in provider while Firebase
+            # account linking is off. Fail cleanly instead of a 500.
+            raise HTTPException(
+                status_code=409,
+                detail="An account with this email already exists under a different sign-in method",
+            )
         await db.refresh(user)
     return user
 

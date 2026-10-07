@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
-from celery.signals import task_prerun, worker_process_init
+from celery.signals import beat_init, task_prerun, worker_init, worker_process_init
 
 from app.config import settings
 
@@ -18,6 +18,8 @@ celery = Celery(
 )
 celery.conf.update(
     result_backend=settings.redis_url,
+    # No code reads task results (no AsyncResult.get); skip storing them.
+    task_ignore_result=True,
     timezone="UTC",
     beat_schedule={
         "check-for-new-cases": {
@@ -30,6 +32,19 @@ celery.conf.update(
         },
     },
 )
+
+
+@worker_init.connect
+@beat_init.connect
+def _validate_config(**_kwargs: object) -> None:
+    # Celery's signal dispatcher logs and swallows Exception subclasses raised by
+    # receivers, so a plain raise would let the worker start half-configured.
+    # SystemExit is not swallowed: the process exits non-zero.
+    from app.config import ConfigError
+    try:
+        settings.validate_for_runtime("worker")
+    except ConfigError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 @worker_process_init.connect
