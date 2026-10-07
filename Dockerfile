@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # ---- builder: resolve and install locked deps into a self-contained venv ----
 FROM python:3.12-slim AS builder
 
@@ -12,8 +10,9 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /build
 COPY pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev --no-install-project
+# No BuildKit cache mount: Cloud Build's default builder is the legacy one, and
+# the uv cache only lives in this discarded builder stage anyway.
+RUN uv sync --frozen --no-dev --no-install-project --no-cache
 
 # tiktoken downloads its BPE file on first use; bake it in so cold starts don't
 # depend on internet egress (app/services/context_window.py loads it at import).
