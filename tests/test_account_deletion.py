@@ -225,14 +225,15 @@ async def test_queued_push_after_deletion_is_dropped(client, world, db_session):
     assert state.token is None
 
 
-async def test_same_person_can_sign_up_again_after_deletion(client, world):
+async def test_same_person_can_sign_up_again_after_deletion(client, world, rsa_keys, monkeypatch):
     _, _, stu, stu_token, _ = world
+    from app.config import settings
+    monkeypatch.setattr(settings, "jwt_private_key", rsa_keys[0])  # login mints a real JWT
     old_email = stu.email
     with patch("app.services.account_deletion.firebase_auth.delete_user"):
         assert (await _delete(client, stu_token)).status_code == 204
     decoded = {"uid": f"new-{uuid.uuid4().hex}", "email": old_email, "email_verified": True}
     with patch("app.services.auth_service.firebase_auth.verify_id_token", return_value=decoded), \
-         patch("app.services.auth_service.settings.allow_test_accounts", True), \
          patch("app.services.auth_service.settings.allow_non_rutgers_accounts", True):
         login = await client.post("/api/v1/auth/login", json={"firebase_id_token": "t"})
     assert login.status_code == 200

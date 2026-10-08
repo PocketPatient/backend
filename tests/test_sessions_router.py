@@ -369,8 +369,11 @@ async def test_send_message_returns_202_with_echoed_student_message(client, setu
     assert "eta" in mock_task.apply_async.call_args.kwargs
 
 
-async def test_send_message_instant_query_param_dispatches_without_eta(client, setup, db_session):
+async def test_send_message_instant_query_param_dispatches_without_eta(client, setup, db_session, monkeypatch):
     _, _, stu, stu_token, course, disease = setup
+    # `instant` is only honored when test accounts are enabled; don't depend on .env.
+    from app.config import settings
+    monkeypatch.setattr(settings, "allow_test_accounts", True)
 
     session = Session(
         disease_id=disease.id, user_id=stu.id, course_id=course.id,
