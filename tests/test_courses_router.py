@@ -103,7 +103,6 @@ async def test_get_course_detail_wrong_professor_returns_404(client, professor, 
     course_id = create_resp.json()["id"]
 
     import uuid
-    import os
     from datetime import datetime, timezone
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from app.models.user import User, UserRole

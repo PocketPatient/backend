@@ -12,11 +12,13 @@ from app.config import settings
 
 _AUTH_PREFIX = "/api/v1/auth"
 _ANALYTICS_PREFIX = "/api/v1/analytics"
+_REPORTS_PREFIX = "/api/v1/reports"
 _MESSAGE_RE = re.compile(r"^/api/v1/sessions/[^/]+/messages/?$")
 
 _AUTH_LIMIT = 10
 _MESSAGE_LIMIT = 30
 _ANALYTICS_LIMIT = 60
+_REPORTS_LIMIT = 10
 _STANDARD_LIMIT = 100
 _WINDOW_SECONDS = 60
 
@@ -90,6 +92,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         elif request.method == "POST" and _MESSAGE_RE.match(path):
             limit = _MESSAGE_LIMIT
             key = _user_key(request, "msg")
+        elif path.startswith(_REPORTS_PREFIX):
+            limit = _REPORTS_LIMIT
+            key = _user_key(request, "reports")
         elif path.startswith(_ANALYTICS_PREFIX):
             limit = _ANALYTICS_LIMIT
             key = _user_key(request, "analytics")

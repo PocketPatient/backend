@@ -13,6 +13,8 @@ from app.models.enrollment import Enrollment
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
+from app.config import settings
+from app.models.ai_consent import AIConsent
 from app.models.user import User, UserRole
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
@@ -39,6 +41,10 @@ async def setup(db_session):
 
     enrollment = Enrollment(user_id=stu.id, course_id=course.id)
     db_session.add(enrollment)
+    db_session.add(AIConsent(
+        user_id=stu.id, version=settings.ai_consent_version,
+        accepted_at=datetime.now(timezone.utc),
+    ))
 
     unit = Unit(
         course_id=course.id, label="Unit 1",

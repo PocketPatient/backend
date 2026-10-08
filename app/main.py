@@ -14,7 +14,7 @@ from app.middleware.logging import LoggingMiddleware
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.observability import register_slow_query_logging
 from app.openapi import TAGS_METADATA
-from app.routers import analytics, auth, courses, disease_documents, enrollments, sessions, units, users
+from app.routers import admin, analytics, auth, courses, disease_documents, enrollments, reports, sessions, units, users
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
@@ -104,6 +104,8 @@ app.include_router(enrollments.router, prefix="/api/v1")
 app.include_router(units.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(analytics.router, prefix="/api/v1")
+app.include_router(reports.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1")
 
 
 @app.get("/health", summary="Health check", tags=["health"])

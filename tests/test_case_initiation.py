@@ -12,7 +12,6 @@ from app.models.disease import Disease
 from app.models.enrollment import Enrollment
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
-from app.models.user import User, UserRole
 
 pytestmark = pytest.mark.usefixtures("clean_tables")
 

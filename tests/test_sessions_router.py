@@ -121,7 +121,6 @@ async def test_create_session_not_enrolled_returns_404(client, setup, db_session
     db_session.add(other_stu)
     await db_session.commit()
 
-    from jose import jwt
     other_token = _make_token(other_stu.id, private_pem)
 
     resp = await client.post(
@@ -327,7 +326,6 @@ async def test_get_session_by_id_unauthorized_user_returns_404(client, setup, db
     db_session.add(session)
     await db_session.commit()
 
-    from jose import jwt
     other_token = _make_token(other_stu.id, private_pem)
     resp = await client.get(
         f"/api/v1/sessions/{session.id}",
@@ -513,7 +511,6 @@ async def test_send_message_not_owner_returns_404(client, setup, db_session, rsa
     db_session.add(session)
     await db_session.commit()
 
-    from jose import jwt
     other_token = _make_token(other_stu.id, private_pem)
     resp = await client.post(
         f"/api/v1/sessions/{session.id}/messages",
@@ -655,7 +652,6 @@ async def test_diagnose_not_owner_returns_404(client, setup, db_session, rsa_key
     db_session.add(other)
     session = await _seed_active_session(db_session, stu, course, disease)
 
-    from jose import jwt
     token = _make_token(other.id, private_pem)
     resp = await client.post(
         f"/api/v1/sessions/{session.id}/diagnose",

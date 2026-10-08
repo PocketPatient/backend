@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import pytest
 
 from app.services.disease_parser import ParsedDisease, ParsedUnit, ParseResult
-from app.services.document_diff import DiffResult, ExistingDisease, compute_diff
+from app.services.document_diff import ExistingDisease, compute_diff
 
 _NUDGE = {"frequency": "rarely", "tone": "flat", "example": ""}
 

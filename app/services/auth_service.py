@@ -63,6 +63,9 @@ async def get_or_create_user(db: AsyncSession, firebase_data: dict) -> User:
     # Identity is the stable Firebase UID (stored in the legacy-named google_uid
     # column) for every provider — never the email.
     user = await _get_user_by_uid(db, firebase_data["uid"])
+    if user is not None and user.deleted_at is not None:
+        # Firebase identity deletion still pending: never resurrect a deleted account.
+        raise HTTPException(status_code=403, detail="This account has been deleted")
     if user is None:
         user = User(
             google_uid=firebase_data["uid"],
@@ -145,7 +148,9 @@ async def verify_and_rotate_refresh_token(
     await redis.setex(
         f"refresh_consumed:{token_hash}", _REFRESH_TOKEN_EXPIRE_SECONDS, user_id_str
     )
-    result = await db.execute(select(User).where(User.id == uuid.UUID(user_id_str)))
+    result = await db.execute(
+        select(User).where(User.id == uuid.UUID(user_id_str), User.deleted_at.is_(None))
+    )
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=401, detail="User not found")

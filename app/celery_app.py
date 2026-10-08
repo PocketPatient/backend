@@ -14,6 +14,7 @@ celery = Celery(
         "app.tasks.nudge",
         "app.tasks.case_initiation",
         "app.tasks.push_notifications",
+        "app.tasks.account_deletion",
     ],
 )
 celery.conf.update(
@@ -28,6 +29,10 @@ celery.conf.update(
         },
         "check-for-nudges": {
             "task": "app.tasks.nudge.check_and_send_nudges",
+            "schedule": 3600.0,  # every hour
+        },
+        "sweep-pending-firebase-deletions": {
+            "task": "app.tasks.account_deletion.sweep_pending_firebase_deletions",
             "schedule": 3600.0,  # every hour
         },
     },

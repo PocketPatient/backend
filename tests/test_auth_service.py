@@ -1,6 +1,6 @@
 import hashlib
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -305,7 +305,6 @@ async def test_verify_and_rotate_success(rsa_keys):
     private_pem, public_pem = rsa_keys
     user_id = uuid.uuid4()
     raw_token = "a" * 64
-    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
     existing_user = User()
     existing_user.id = user_id

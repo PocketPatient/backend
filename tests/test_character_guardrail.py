@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 
-import pytest
 
 from app.models.message import MessageRole
 from app.services.character_guardrail import (

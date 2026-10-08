@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import time, timezone
 from unittest.mock import MagicMock
 
-import pytest
 
 from app.models.course import Course
 from app.services.messaging import is_within_messaging_window, window_end_utc

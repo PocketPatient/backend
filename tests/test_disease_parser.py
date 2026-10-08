@@ -3,10 +3,6 @@ import json
 import pytest
 
 from app.services.disease_parser import (
-    ParseError,
-    ParseResult,
-    ParsedDisease,
-    ParsedUnit,
     parse,
     parse_csv,
     parse_json,

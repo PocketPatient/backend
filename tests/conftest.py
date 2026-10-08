@@ -10,12 +10,12 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import ASGITransport, AsyncClient
 from jose import jwt
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app import config as app_config
 from app.database import Base, get_db
 from app.main import app
+from app.models.ai_consent import AIConsent
 from app.models.user import User, UserRole
 from app.services.auth_service import JWT_AUDIENCE, JWT_ISSUER
 
@@ -113,7 +113,7 @@ async def _truncate_all():
             "AND state = 'idle in transaction'"
         )
         await conn.execute(
-            "TRUNCATE TABLE scores, messages, sessions, disease_documents, diseases, units, enrollments, courses, users CASCADE"
+            "TRUNCATE TABLE ai_response_reports, ai_consents, scores, messages, sessions, disease_documents, diseases, units, enrollments, courses, users CASCADE"
         )
     finally:
         await conn.close()
@@ -174,6 +174,14 @@ async def student(db_session, rsa_keys):
         updated_at=datetime.now(timezone.utc),
     )
     db_session.add(user)
+    await db_session.flush()
+    # Students in tests have accepted the current AI disclosure; consent-gate
+    # tests revoke it explicitly (see test_ai_consent.py).
+    db_session.add(AIConsent(
+        user_id=user.id,
+        version=app_config.settings.ai_consent_version,
+        accepted_at=datetime.now(timezone.utc),
+    ))
     await db_session.commit()
     await db_session.refresh(user)
     return user, _make_token(user.id, private_pem)

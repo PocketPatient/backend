@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # Cloud Storage bucket for disease-document uploads. Required in production:
     # Cloud Run's local disk is per-instance memory and not shared.
     gcs_upload_bucket: str = ""
+    # Version of the AI disclosure users must have accepted before any Gemini
+    # call is made on their behalf. Bump it when the disclosure text changes:
+    # every user is then re-prompted (older acceptances no longer count).
+    ai_consent_version: str = "2026-10-v1"
     jwt_private_key: str = Field("", repr=False)
     jwt_public_key: str = ""
     gemini_api_key: str = Field("", repr=False)

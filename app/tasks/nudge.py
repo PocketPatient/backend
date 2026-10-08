@@ -13,6 +13,7 @@ from app.tasks._run import run_task_async
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
+from app.services.ai_consent import has_active_consent
 from app.services.character_guardrail import generate_in_character
 from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
@@ -62,6 +63,9 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
         await db.execute(select(Session).where(Session.id == session_id))
     ).scalar_one_or_none()
     if session is None or session.status != SessionStatus.active:
+        return
+    # Nudges are Gemini-generated: skip students without active AI consent.
+    if not await has_active_consent(db, session.user_id):
         return
 
     last_message = (

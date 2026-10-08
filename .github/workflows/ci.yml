@@ -1,8 +1,10 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches: [dev]
+    branches: [main, dev]
 
 jobs:
   lint-and-test:
@@ -25,25 +27,29 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/pocketpatient
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/pocketpatient_test
       REDIS_URL: redis://localhost:6379/0
-      SECRET_KEY: ci-secret
+      APP_ENV: test
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.11"
-          cache: pip
+          version: "0.11.15"
+          enable-cache: true
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt ruff
+      - name: Install dependencies (from uv.lock)
+        run: uv sync --frozen --python 3.12
 
       - name: Lint
-        run: ruff check app/
+        run: uv run --with ruff==0.16.10 ruff check app/ tests/ alembic/
 
-      - name: Run migrations
-        run: alembic upgrade head
+      - name: Migrations apply cleanly
+        run: uv run alembic upgrade head
+
+      - name: Create test database
+        run: PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE pocketpatient_test"
 
       - name: Test
-        run: python -m pytest tests/ -v --tb=short || echo "No tests yet"
+        run: uv run pytest -q

@@ -21,6 +21,7 @@ from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
 from app.models.user import User, UserRole
 from app.services import session_service
+from app.services.ai_consent import has_active_consent
 from app.services.messaging import (
     is_within_messaging_window,
     window_end_utc as compute_window_end_utc,
@@ -136,6 +137,10 @@ async def _check_and_create(
             )
         ).scalar_one_or_none()
         if existing:
+            return None
+        # Auto-initiated cases call Gemini for the opener: skip (don't fail) for
+        # students who haven't accepted the current AI disclosure.
+        if not await has_active_consent(db, user_id):
             return None
         session, _ = await session_service.create_new_session(user_id, course_id, db)
         return session.id

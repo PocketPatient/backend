@@ -41,4 +41,6 @@ TAGS_METADATA: list[dict] = [
     {"name": "enrollments", "description": "Joining courses and roster management."},
     {"name": "sessions", "description": "Student patient-simulation sessions, messaging, diagnosis."},
     {"name": "analytics", "description": "Student and professor analytics and CSV export."},
+    {"name": "reports", "description": "Report AI-generated patient messages."},
+    {"name": "admin", "description": "Admin-only moderation queue for AI reports."},
 ]

@@ -13,6 +13,7 @@ from app.tasks._run import run_task_async
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
+from app.services.ai_consent import has_active_consent
 from app.services.character_guardrail import generate_in_character
 from app.services.context_window import build_history, count_tokens
 from app.services.llm_gateway import gateway, patient_identity
@@ -43,6 +44,9 @@ async def _generate_and_send(session_id: str, my_task_id: str) -> None:
             or session.status != SessionStatus.active
             or session.pending_reply_task_id != my_task_id
         ):
+            return
+        # Re-check at execution time: consent may have been revoked after queueing.
+        if not await has_active_consent(db, session.user_id):
             return
 
         disease = (

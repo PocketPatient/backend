@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-from jose import jwt
 
 from app.models.course import Course
 from app.models.disease import Disease

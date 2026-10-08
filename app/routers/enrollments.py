@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.deps import get_current_user, require_role
+from app.deps import require_role
 from app.openapi import errors
 from app.models.course import Course
 from app.models.enrollment import Enrollment

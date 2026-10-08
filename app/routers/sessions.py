@@ -33,6 +33,7 @@ from app.schemas.session import (
     SessionOut,
 )
 from app.services.analytics_cache import class_summary_key, invalidate, summary_key
+from app.services.ai_consent import require_ai_consent
 from app.services.analytics_service import list_completed_sessions
 from app.services.grading_service import generate_diagnosis_hint, grade_diagnosis
 from app.services.session_service import (
@@ -230,6 +231,8 @@ async def diagnose(
     if session.status != SessionStatus.active:
         raise HTTPException(status_code=409, detail="Session is not active")
 
+    # Grading and the hint are Gemini calls.
+    await require_ai_consent(db, current_user.id)
     score = await grade_diagnosis(session, body, db)
     disease = (
         await db.execute(select(Disease).where(Disease.id == session.disease_id))

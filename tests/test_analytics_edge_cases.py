@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
-import pytest_asyncio
 
 from app.models.course import Course
 from app.models.disease import Disease

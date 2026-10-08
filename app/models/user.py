@@ -43,3 +43,7 @@ class User(Base):
     # both null (no quiet window). A window where start > end wraps past midnight.
     quiet_hours_start: Mapped[time | None] = mapped_column(Time, nullable=True)
     quiet_hours_end: Mapped[time | None] = mapped_column(Time, nullable=True)
+    # Set when the user deletes their account. The row is kept as a de-identified
+    # tombstone (see services/account_deletion.py); deleted users cannot
+    # authenticate or log in again with the same Firebase identity.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

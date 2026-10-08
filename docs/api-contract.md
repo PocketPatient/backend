@@ -31,6 +31,10 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | PUT | `/api/v1/users/me/role` | Set role (once only) | Bearer JWT | ✅ Week 2 |
 | PUT | `/api/v1/users/me/fcm-token` | Store or replace FCM push token | Bearer JWT | ✅ Week 9 |
 | PUT | `/api/v1/users/me/notification-preferences` | Set push on/off + quiet hours | Bearer JWT | ✅ Week 15 |
+| GET | `/api/v1/users/me/ai-consent` | AI-disclosure consent status | Bearer JWT | ✅ Store compliance |
+| PUT | `/api/v1/users/me/ai-consent` | Accept current AI disclosure | Bearer JWT | ✅ Store compliance |
+| DELETE | `/api/v1/users/me/ai-consent` | Withdraw AI consent | Bearer JWT | ✅ Store compliance |
+| DELETE | `/api/v1/users/me` | Permanently delete account | Bearer JWT | ✅ Store compliance |
 
 ### GET /api/v1/users/me
 **Response:** `UserOut` — id, google_uid, email, role, is_verified, display_name, created_at  
@@ -58,6 +62,39 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 **Response (200):** the saved preferences (times serialized as `HH:MM:SS`, `null` when no quiet window).  
 **Errors:** 401 unauthenticated, 422 only one of start/end provided  
 **Behavior:** When a push is raised, `send_push` drops it if `push_enabled` is false; if the current time is inside the quiet window it re-enqueues the push with an ETA at the window's close (delivered when quiet hours end) rather than dropping it.
+
+### AI consent — `GET` / `PUT` / `DELETE /api/v1/users/me/ai-consent`
+**Auth:** any authenticated user. No request body.  
+**Response (200):** `{"required_version": "2026-10-v1", "active": true, "accepted_version": "2026-10-v1", "accepted_at": "<ISO-8601>"}`  
+- `PUT` records acceptance of the current `required_version` (idempotent). `DELETE` withdraws it. Every accept/revoke is kept as an audit row.
+- **Enforcement:** every Gemini path requires active consent for the current version: `POST /sessions`, `POST /sessions/{id}/messages`, `POST /sessions/{id}/diagnose`. Without it they return **403** `{"detail": ..., "code": "AI_CONSENT_REQUIRED", "required_version": ...}`, and nothing is persisted or queued. Background bot replies, nudges and auto-initiated cases re-check consent when they run and skip silently.
+- Bumping `AI_CONSENT_VERSION` (server env) re-prompts every user: older acceptances stop counting.
+
+### DELETE /api/v1/users/me
+**Auth:** any authenticated user  
+**Request:** `{"confirm": "DELETE"}` (anything else → 422)  
+**Response:** **204** when fully deleted, or **202** `{"status": "identity_deletion_pending", "detail": ...}` when app data is deleted but removal of the Firebase identity is being retried automatically.  
+**Behavior:** The user's sessions, messages, scores, enrollments, AI consents and reports are deleted. The user row is kept as a de-identified tombstone (email replaced, name/FCM token cleared) so a professor's courses stay intact for their students. Refresh tokens and the presented access token are revoked, pending bot replies are cancelled, and the Firebase identity is deleted. Afterwards, any request with the old token returns 401, and logging in with the old Firebase identity returns 403. Full map: `app/services/account_deletion.py`.  
+**iOS client:** for Sign in with Apple users, revoke the Apple token (`Auth.auth().revokeToken(withAuthorizationCode:)`) *before* calling this endpoint (App Store requirement).
+
+---
+
+## Reports
+
+| Method | Path | Description | Auth | Status |
+|--------|------|-------------|------|--------|
+| POST | `/api/v1/reports/ai-response` | Report an AI patient message | Bearer JWT | ✅ Store compliance |
+| GET | `/api/v1/admin/ai-reports?status=open` | Moderation queue | Admin | ✅ Store compliance |
+| POST | `/api/v1/admin/ai-reports/{id}/resolve` | Resolve with a note | Admin | ✅ Store compliance |
+
+### POST /api/v1/reports/ai-response
+**Request:** `{"message_id": "<uuid>", "reason": "harmful|inappropriate|inaccurate|out_of_character|other", "comment": "optional, ≤1000 chars"}`  
+**Response:** **201** new report, or **200** with the existing report if this user already reported the message.  
+**Errors:** 404 if the message isn't in the caller's own session (student) or their course (professor); 422 if it isn't an AI (patient) message. Rate limited to 10/min.  
+The report stores only the message reference, never a copy of the text.
+
+### Admin moderation
+Admins are users with `role=admin`, set directly in the database (no self-service path). `GET /admin/ai-reports` returns open reports oldest-first, including the reported message's current text. `POST /admin/ai-reports/{id}/resolve` takes `{"resolution_note": "..."}`.
 
 ---
 

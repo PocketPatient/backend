@@ -14,6 +14,7 @@ from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
 from app.models.unit import Unit, UnitStatus
+from app.services.ai_consent import require_ai_consent
 from app.services.character_guardrail import generate_in_character
 from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
@@ -77,6 +78,8 @@ async def create_new_session(
     course_id: uuid.UUID,
     db: AsyncSession,
 ) -> tuple[Session, Message]:
+    # Gemini generates the opening message: no AI call without consent.
+    await require_ai_consent(db, user_id)
     diseases = await _get_disease_pool(course_id, db)
     if not diseases:
         raise HTTPException(status_code=422, detail="No diseases available in the course pool")
@@ -157,6 +160,8 @@ async def handle_student_message(
 ) -> Message:
     """Save the student's message, refresh latency stats, and (re)schedule the
     delayed bot reply. Reply generation itself happens in generate_and_send_reply."""
+    # The reply is Gemini-generated: refuse before persisting anything.
+    await require_ai_consent(db, session.user_id)
     disease = (
         await db.execute(select(Disease).where(Disease.id == session.disease_id))
     ).scalar_one()
