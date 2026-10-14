@@ -37,7 +37,7 @@ def _isolate_env(monkeypatch):
         "K_SERVICE", "CLOUD_RUN_JOB", "APP_ENV", "DATABASE_URL", "DB_PASSWORD",
         "REDIS_URL", "GEMINI_API_KEY", "JWT_PRIVATE_KEY", "JWT_PUBLIC_KEY",
         "FIREBASE_CREDENTIALS_PATH", "FIREBASE_PROJECT_ID", "ALLOW_TEST_ACCOUNTS",
-        "GCS_UPLOAD_BUCKET", "ALLOW_NON_RUTGERS_ACCOUNTS", "TRUSTED_PROXY_COUNT",
+        "GCS_UPLOAD_BUCKET", "ALLOW_NON_RUTGERS_ACCOUNTS", "TRUSTED_PROXY_COUNT", "GEMINI_VERTEXAI",
     ):
         monkeypatch.delenv(var, raising=False)
 
@@ -89,6 +89,8 @@ def test_cloud_run_forces_production(monkeypatch):
         ({"firebase_credentials_path": ""}, "FIREBASE_PROJECT_ID"),
         ({"allow_test_accounts": True}, "ALLOW_TEST_ACCOUNTS"),
         ({"gcs_upload_bucket": ""}, "GCS_UPLOAD_BUCKET"),
+        ({"gemini_api_key": "AQ.express-key", "gemini_vertexai": False}, "GEMINI_VERTEXAI=true"),
+        ({"gemini_api_key": "AIzaDevKey", "gemini_vertexai": True}, "GEMINI_VERTEXAI=false"),
         ({"trusted_proxy_count": 0}, "TRUSTED_PROXY_COUNT"),
     ],
 )
@@ -114,6 +116,10 @@ def test_worker_does_not_require_jwt_keys_or_bucket(sa_file):
         sa_file, jwt_private_key="", jwt_public_key="", gcs_upload_bucket="",
         trusted_proxy_count=0,
     ).validate_for_runtime("worker")
+
+
+def test_vertex_express_key_with_vertex_mode_passes(sa_file):
+    _prod(sa_file, gemini_api_key="AQ.express-key", gemini_vertexai=True).validate_for_runtime("api")
 
 
 def test_non_rutgers_demo_flag_is_allowed_in_production(sa_file):

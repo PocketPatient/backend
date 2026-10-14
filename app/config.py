@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     jwt_private_key: str = Field("", repr=False)
     jwt_public_key: str = ""
     gemini_api_key: str = Field("", repr=False)
+    # True when GEMINI_API_KEY is a Vertex AI express-mode key (production);
+    # False for a Gemini Developer API key (AI Studio, local dev).
+    gemini_vertexai: bool = False
     # Number of X-Forwarded-For entries appended by infrastructure we operate
     # (Cloud Run's front end = 1). 0 = ignore XFF entirely. See middleware/rate_limit.py.
     trusted_proxy_count: int = Field(0, ge=0)
@@ -113,6 +116,18 @@ class Settings(BaseSettings):
             problems.append("REDIS_URL is not set")
         if not self.gemini_api_key:
             problems.append("GEMINI_API_KEY is not set")
+        else:
+            # Key type is identifiable by its public prefix. A mismatch makes every
+            # Gemini call fail with 403 at request time, so catch it at startup.
+            key = self.gemini_api_key.strip()
+            if key.startswith("AQ.") and not self.gemini_vertexai:
+                problems.append(
+                    "GEMINI_API_KEY is a Vertex AI express-mode key; set GEMINI_VERTEXAI=true"
+                )
+            elif key.startswith("AIza") and self.gemini_vertexai:
+                problems.append(
+                    "GEMINI_API_KEY is a Gemini Developer API key; set GEMINI_VERTEXAI=false"
+                )
         if self.firebase_credentials_path:
             if not os.path.isfile(self.firebase_credentials_path):
                 problems.append(

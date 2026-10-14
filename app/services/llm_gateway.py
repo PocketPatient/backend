@@ -52,7 +52,11 @@ def patient_identity(session_id_int: int) -> tuple[str, int, str]:
 
 class LLMGateway:
     def __init__(self) -> None:
-        self.client = genai.Client(api_key=settings.gemini_api_key)
+        # Vertex AI express-mode keys ("AQ." prefix) only work with vertexai=True;
+        # Gemini Developer API keys ("AIza") with the default. See GEMINI_VERTEXAI.
+        self.client = genai.Client(
+            api_key=settings.gemini_api_key, vertexai=settings.gemini_vertexai
+        )
         self.model = "gemini-3.5-flash"
 
     def _gen_config(self, system_prompt: str) -> GenerateContentConfig:
