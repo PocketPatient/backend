@@ -198,7 +198,7 @@ async def mark_professor_verified(db: AsyncSession, user_id: uuid.UUID) -> User 
     """
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    if user is None or user.role != UserRole.professor:
+    if user is None or user.role != UserRole.professor or user.deleted_at is not None:
         return None
     user.is_verified = True
     db.add(user)

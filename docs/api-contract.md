@@ -86,6 +86,8 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 | POST | `/api/v1/reports/ai-response` | Report an AI patient message | Bearer JWT | ✅ Store compliance |
 | GET | `/api/v1/admin/ai-reports?status=open` | Moderation queue | Admin | ✅ Store compliance |
 | POST | `/api/v1/admin/ai-reports/{id}/resolve` | Resolve with a note | Admin | ✅ Store compliance |
+| GET | `/api/v1/admin/professors/pending` | Professors awaiting verification | Admin | ✅ |
+| POST | `/api/v1/admin/users/{id}/verify-professor` | Verify a professor (unlocks courses/uploads/analytics) | Admin | ✅ |
 
 ### POST /api/v1/reports/ai-response
 **Request:** `{"message_id": "<uuid>", "reason": "harmful|inappropriate|inaccurate|out_of_character|other", "comment": "optional, ≤1000 chars"}`  
@@ -94,7 +96,9 @@ Base URL (local dev): `http://localhost:8000/api/v1`
 The report stores only the message reference, never a copy of the text.
 
 ### Admin moderation
-Admins are users with `role=admin`, set directly in the database (no self-service path). `GET /admin/ai-reports` returns open reports oldest-first, including the reported message's current text. `POST /admin/ai-reports/{id}/resolve` takes `{"resolution_note": "..."}`.
+Admins are users with `role=admin`, created with the operator CLI (`python -m app.admin_cli make-admin <email>`); there is no self-service path.
+
+**Professor verification:** choosing the professor role (`PUT /users/me/role`) leaves `is_verified=false`, and unverified professors get 403 on professor-only endpoints. An admin approves them via `GET /admin/professors/pending` → `POST /admin/users/{id}/verify-professor` (404 if the user isn't a live professor), or with `python -m app.admin_cli verify-professor <email>`. `GET /admin/ai-reports` returns open reports oldest-first, including the reported message's current text. `POST /admin/ai-reports/{id}/resolve` takes `{"resolution_note": "..."}`.
 
 ---
 

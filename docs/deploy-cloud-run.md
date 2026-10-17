@@ -58,3 +58,21 @@ config (see `Settings.validate_for_runtime`), so a bad revision never receives t
 Review window only: `ALLOW_NON_RUTGERS_ACCOUNTS=true` via
 `gcloud run services update pocket-patient-api --region=us-east1 --update-env-vars=ALLOW_NON_RUTGERS_ACCOUNTS=true`.
 Remove it after approval with `--remove-env-vars=ALLOW_NON_RUTGERS_ACCOUNTS`.
+
+## Admin tasks (operator CLI)
+
+The `pp-admin` Cloud Run job runs `python -m app.admin_cli` with the API image and DB access.
+The account must have signed in to the app once.
+
+```bash
+P=the-pocket-patient
+# make an admin (one-time bootstrap; afterwards admins can use the /admin API)
+gcloud run jobs execute pp-admin --project=$P --region=us-east1 --wait --args="-m,app.admin_cli,make-admin,you@rutgers.edu"
+# approve a professor (or: POST /api/v1/admin/users/{id}/verify-professor)
+gcloud run jobs execute pp-admin --project=$P --region=us-east1 --wait --args="-m,app.admin_cli,verify-professor,prof@rutgers.edu"
+gcloud run jobs execute pp-admin --project=$P --region=us-east1 --wait --args="-m,app.admin_cli,list-pending-professors"
+# output:
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="pp-admin"' --project=$P --freshness=10m --format="value(textPayload)"
+```
+
+After each release, point the job at the new image too: `gcloud run jobs update pp-admin --project=$P --region=us-east1 --image="$IMG"`.

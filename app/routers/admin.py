@@ -1,6 +1,7 @@
-"""Admin-only moderation queue for AI response reports.
+"""Admin-only endpoints: AI-report moderation and professor verification.
 
-Admins are users with role=admin, granted out-of-band (no self-service path).
+Admins are users with role=admin, granted out-of-band via the admin CLI
+(``python -m app.admin_cli make-admin <email>``); there is no self-service path.
 """
 from __future__ import annotations
 
@@ -15,9 +16,11 @@ from app.database import get_db
 from app.deps import require_role
 from app.models.ai_report import AIReportStatus, AIResponseReport
 from app.models.message import Message
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.openapi import errors
 from app.schemas.ai_report import AIReportAdminOut, AIReportResolve
+from app.schemas.user import UserOut
+from app.services.auth_service import mark_professor_verified
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -84,3 +87,37 @@ async def resolve_ai_report(
     await db.commit()
     await db.refresh(report)
     return _admin_out(report, content)
+
+
+# ── Professor verification ────────────────────────────────────────────────────
+
+@router.get("/professors/pending", response_model=list[UserOut], summary="List professors awaiting verification (admin)", responses=errors(401, 403, 429))
+async def list_pending_professors(
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> list[User]:
+    return list(
+        (
+            await db.execute(
+                select(User)
+                .where(
+                    User.role == UserRole.professor,
+                    User.is_verified.is_not(True),
+                    User.deleted_at.is_(None),
+                )
+                .order_by(User.created_at.asc())
+            )
+        ).scalars()
+    )
+
+
+@router.post("/users/{user_id}/verify-professor", response_model=UserOut, summary="Verify a professor account (admin)", responses=errors(401, 403, 404, 429))
+async def verify_professor(
+    user_id: uuid.UUID,
+    _admin: User = Depends(require_role("admin")),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user = await mark_professor_verified(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Professor not found")
+    return user
