@@ -25,6 +25,14 @@ def _ctx(db_session):
     return ctx
 
 
+@pytest.fixture(autouse=True)
+def _inside_messaging_window():
+    """Default every test to inside the course's messaging window so results
+    don't depend on the wall-clock time the suite runs at."""
+    with patch("app.tasks.nudge.is_within_messaging_window", return_value=True) as m:
+        yield m
+
+
 @pytest_asyncio.fixture
 async def nudge_setup(professor, student, db_session):
     prof, _ = professor
@@ -123,7 +131,7 @@ async def test_skips_session_whose_last_message_is_from_student(nudge_setup, db_
 async def test_skips_session_silent_for_less_than_min_cadence(nudge_setup, db_session):
     prof, stu = nudge_setup
     course, disease = await _make_course_with_disease(db_session, prof, stu, frequency="high")
-    session = await _make_session(db_session, stu, course, disease, last_message_hours_ago=2)
+    session = await _make_session(db_session, stu, course, disease, last_message_hours_ago=1)
 
     _, mock_push = await _run_check(db_session)
 
@@ -131,22 +139,30 @@ async def test_skips_session_silent_for_less_than_min_cadence(nudge_setup, db_se
     mock_push.delay.assert_not_called()
 
 
-async def test_first_nudge_requires_24h_silence_regardless_of_tier(nudge_setup, db_session):
+async def test_first_nudge_waits_tier_specific_silence(nudge_setup, db_session):
+    """First follow-up: high after 2h, medium after 4h, low after 8h of silence."""
     prof, stu = nudge_setup
-    # 6h cadence, but the *first* nudge ignores frequency and gates at 24h
-    course1, disease1 = await _make_course_with_disease(db_session, prof, stu, frequency="high")
-    course2, disease2 = await _make_course_with_disease(db_session, prof, stu, frequency="high")
-    too_soon = await _make_session(db_session, stu, course1, disease1, last_message_hours_ago=10)
-    long_silent = await _make_session(db_session, stu, course2, disease2, last_message_hours_ago=25)
+    cases = [  # (tier, hours silent, expect nudge)
+        ("high", 1.5, False), ("high", 2.5, True),
+        ("medium", 3.5, False), ("medium", 4.5, True),
+        ("low", 7, False), ("low", 9, True),
+        (" High ", 2.5, True),  # tiers come from uploaded docs: case/space-insensitive
+    ]
+    sessions = []
+    for tier, hours, expected in cases:
+        course, disease = await _make_course_with_disease(db_session, prof, stu, frequency=tier)
+        sessions.append((await _make_session(
+            db_session, stu, course, disease, last_message_hours_ago=hours), tier, hours, expected))
 
     await _run_check(db_session)
 
-    assert await _nudge_messages(db_session, too_soon.id) == []
-    assert len(await _nudge_messages(db_session, long_silent.id)) == 1
+    for session, tier, hours, expected in sessions:
+        got = len(await _nudge_messages(db_session, session.id))
+        assert got == (1 if expected else 0), (tier, hours)
 
 
 async def test_dead_tier_regression_high_fires_before_medium_before_low(nudge_setup, db_session):
-    """At 10h since the last nudge: high (6h) should fire, medium (24h) and low (48h)
+    """At 6h since the last nudge: high (4h) should fire, medium (12h) and low (24h)
     should not — proving each cadence tier is independently reachable."""
     prof, stu = nudge_setup
     high_course, high_disease = await _make_course_with_disease(db_session, prof, stu, frequency="high")
@@ -155,15 +171,15 @@ async def test_dead_tier_regression_high_fires_before_medium_before_low(nudge_se
 
     high_session = await _make_session(
         db_session, stu, high_course, high_disease,
-        last_message_hours_ago=10, last_message_is_nudge=True,
+        last_message_hours_ago=6, last_message_is_nudge=True,
     )
     medium_session = await _make_session(
         db_session, stu, medium_course, medium_disease,
-        last_message_hours_ago=10, last_message_is_nudge=True,
+        last_message_hours_ago=6, last_message_is_nudge=True,
     )
     low_session = await _make_session(
         db_session, stu, low_course, low_disease,
-        last_message_hours_ago=10, last_message_is_nudge=True,
+        last_message_hours_ago=6, last_message_is_nudge=True,
     )
 
     await _run_check(db_session)
@@ -173,7 +189,7 @@ async def test_dead_tier_regression_high_fires_before_medium_before_low(nudge_se
     assert len(await _nudge_messages(db_session, low_session.id)) == 1  # only the seeded one
 
 
-async def test_unrecognized_frequency_defaults_to_24h(nudge_setup, db_session):
+async def test_unrecognized_frequency_defaults_to_medium(nudge_setup, db_session):
     prof, stu = nudge_setup
     course1, disease1 = await _make_course_with_disease(db_session, prof, stu, frequency="extreme")
     course2, disease2 = await _make_course_with_disease(db_session, prof, stu, frequency="extreme")
@@ -272,3 +288,22 @@ def test_check_and_send_nudges_invokes_run_check():
 
         mock_run.assert_called_once_with()
         mock_rta.assert_called_once_with("coro-sentinel")
+
+
+async def test_no_nudge_outside_messaging_window(nudge_setup, db_session, _inside_messaging_window):
+    """A student who went quiet in the evening must not get a 3 AM follow-up:
+    the nudge waits for the course's window, then fires on the next hourly check."""
+    prof, stu = nudge_setup
+    course, disease = await _make_course_with_disease(db_session, prof, stu, frequency="medium")
+    session = await _make_session(db_session, stu, course, disease, last_message_hours_ago=25)
+
+    _inside_messaging_window.return_value = False
+    mock_gw, mock_push = await _run_check(db_session)
+    assert await _nudge_messages(db_session, session.id) == []
+    mock_gw.generate_nudge_message.assert_not_called()
+    mock_push.delay.assert_not_called()
+    assert _inside_messaging_window.call_args.args[0].id == course.id
+
+    _inside_messaging_window.return_value = True
+    await _run_check(db_session)
+    assert len(await _nudge_messages(db_session, session.id)) == 1

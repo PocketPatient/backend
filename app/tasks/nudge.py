@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.celery_app import celery
 from app.database import AsyncSessionLocal
 from app.tasks._run import run_task_async
+from app.models.course import Course
 from app.models.disease import Disease
 from app.models.message import Message, MessageRole
 from app.models.session import Session, SessionStatus
@@ -17,14 +18,19 @@ from app.services.ai_consent import has_active_consent
 from app.services.character_guardrail import generate_in_character
 from app.services.context_window import count_tokens
 from app.services.llm_gateway import gateway, patient_identity
+from app.services.messaging import is_within_messaging_window
 from app.tasks.push_notifications import send_push
 
 logger = logging.getLogger(__name__)
 
-_MIN_NUDGE_GAP_HOURS = 6        # smallest configured cadence (the "high" tier)
-_FIRST_NUDGE_SILENCE_HOURS = 24
-_FREQUENCY_HOURS = {"high": 6, "medium": 24, "low": 48}
-_DEFAULT_FREQUENCY_HOURS = 24
+# Follow-up cadence by the disease's nudge_behavior["frequency"] tier. A patient
+# who reached out checks back within hours, sooner the more urgent they are.
+# Unknown tiers fall back to "medium". Nudges also only go out inside the
+# course's messaging window (see _maybe_send_nudge).
+_FIRST_NUDGE_HOURS = {"high": 2, "medium": 4, "low": 8}   # silence before the first
+_FREQUENCY_HOURS = {"high": 4, "medium": 12, "low": 24}   # gap between later nudges
+_DEFAULT_FREQUENCY = "medium"
+_MIN_NUDGE_GAP_HOURS = min(_FIRST_NUDGE_HOURS.values())   # candidate-query cutoff
 
 
 def _aware(dt: datetime) -> datetime:
@@ -34,9 +40,8 @@ def _aware(dt: datetime) -> datetime:
 async def _fetch_eligible_session_ids(db: AsyncSession) -> list[uuid.UUID]:
     """Active sessions whose latest message is from the patient and at least
     _MIN_NUDGE_GAP_HOURS old — the smallest configured cadence. Selecting at
-    this minimum (rather than the 24h first-nudge threshold) keeps every
-    cadence tier independently reachable; the precise per-session gate runs
-    in _maybe_send_nudge."""
+    this minimum keeps every cadence tier independently reachable; the precise
+    per-session gate runs in _maybe_send_nudge."""
     cutoff = datetime.now(timezone.utc) - timedelta(hours=_MIN_NUDGE_GAP_HOURS)
     latest_msgs = (
         select(Message.session_id, Message.role, Message.sent_at)
@@ -56,7 +61,7 @@ async def _fetch_eligible_session_ids(db: AsyncSession) -> list[uuid.UUID]:
 
 
 async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
-    # TODO(perf): ~4 sequential queries per session (session, last message, last
+    # TODO(perf): ~5 sequential queries per session (session, course, last message, last
     # nudge, disease) — an N+1 across the eligible set. Batch/join if the eligible
     # count grows; kept simple here to avoid risking the per-session gating logic.
     session = (
@@ -66,6 +71,14 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
         return
     # Nudges are Gemini-generated: skip students without active AI consent.
     if not await has_active_consent(db, session.user_id):
+        return
+    # Patients only reach out during the course's messaging window (same rule as
+    # case initiation). An overdue nudge simply fires on the first hourly check
+    # after the window opens.
+    course = (
+        await db.execute(select(Course).where(Course.id == session.course_id))
+    ).scalar_one()
+    if not is_within_messaging_window(course):
         return
 
     last_message = (
@@ -91,15 +104,15 @@ async def _maybe_send_nudge(session_id: uuid.UUID, db: AsyncSession) -> None:
     disease = (
         await db.execute(select(Disease).where(Disease.id == session.disease_id))
     ).scalar_one()
-    frequency_hours = _FREQUENCY_HOURS.get(
-        disease.nudge_behavior.get("frequency"), _DEFAULT_FREQUENCY_HOURS
-    )
+    tier = str(disease.nudge_behavior.get("frequency") or "").strip().lower()
+    if tier not in _FREQUENCY_HOURS:
+        tier = _DEFAULT_FREQUENCY
 
     now = datetime.now(timezone.utc)
     if last_nudge is None:
-        eligible_to_send = (now - _aware(last_message.sent_at)) >= timedelta(hours=_FIRST_NUDGE_SILENCE_HOURS)
+        eligible_to_send = (now - _aware(last_message.sent_at)) >= timedelta(hours=_FIRST_NUDGE_HOURS[tier])
     else:
-        eligible_to_send = (now - _aware(last_nudge.sent_at)) >= timedelta(hours=frequency_hours)
+        eligible_to_send = (now - _aware(last_nudge.sent_at)) >= timedelta(hours=_FREQUENCY_HOURS[tier])
 
     if not eligible_to_send:
         return
