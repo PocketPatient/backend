@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import delete, select
 
+from app.models.ai_consent import AIConsent
 from app.models.course import Course
 from app.models.disease import Disease
 from app.models.enrollment import Enrollment
@@ -20,7 +22,7 @@ _NUDGE = {"frequency": "low", "tone": "neutral", "example": ""}
 
 @pytest_asyncio.fixture
 async def ci_setup(professor, student, db_session):
-    """Course with a released unit, enrolled student, no active session."""
+    """Course with a released unit, enrolled student (consented via conftest), no active session."""
     prof, _ = professor
     stu, _ = student
     course = Course(
@@ -105,6 +107,40 @@ async def test_fetch_eligible_pairs_skips_student_with_active_session(
         pairs = await _fetch_eligible_pairs()
 
     assert not any(uid == stu.id for uid, cid, *_ in pairs)
+
+
+async def _eligible_pairs(db_session):
+    from app.tasks.case_initiation import _fetch_eligible_pairs
+
+    ctx = MagicMock()
+    ctx.__aenter__ = AsyncMock(return_value=db_session)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("app.tasks.case_initiation.AsyncSessionLocal", return_value=ctx):
+        return await _fetch_eligible_pairs()
+
+
+async def test_fetch_eligible_pairs_skips_student_without_consent(ci_setup, db_session):
+    # Not scheduling them keeps the day's dedup slot free, so a student who
+    # consents later that day still gets a case on the next run.
+    stu, _, _ = ci_setup
+    await db_session.execute(delete(AIConsent).where(AIConsent.user_id == stu.id))
+    await db_session.commit()
+
+    assert not any(uid == stu.id for uid, *_ in await _eligible_pairs(db_session))
+
+
+async def test_fetch_eligible_pairs_skips_revoked_or_outdated_consent(ci_setup, db_session):
+    stu, _, _ = ci_setup
+    consent = (
+        await db_session.execute(select(AIConsent).where(AIConsent.user_id == stu.id))
+    ).scalar_one()
+    consent.revoked_at = datetime.now(timezone.utc)
+    db_session.add(AIConsent(
+        user_id=stu.id, version="old-version", accepted_at=datetime.now(timezone.utc)
+    ))
+    await db_session.commit()
+
+    assert not any(uid == stu.id for uid, *_ in await _eligible_pairs(db_session))
 
 
 async def test_fetch_eligible_pairs_skips_outside_window(ci_setup, db_session):

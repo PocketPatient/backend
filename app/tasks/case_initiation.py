@@ -15,6 +15,7 @@ from app.celery_app import celery
 from app.config import settings
 from app.tasks._run import run_task_async
 from app.database import AsyncSessionLocal
+from app.models.ai_consent import AIConsent
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.session import Session, SessionStatus
@@ -73,6 +74,19 @@ async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime, 
                 .correlate(User)
                 .exists()
             )
+            # Skip students without consent here, not only in initiate_case:
+            # scheduling them would spend the day's dedup slot, so consenting
+            # later that day wouldn't bring a case until tomorrow.
+            has_consent = (
+                select(AIConsent.id)
+                .where(
+                    AIConsent.user_id == User.id,
+                    AIConsent.version == settings.ai_consent_version,
+                    AIConsent.revoked_at.is_(None),
+                )
+                .correlate(User)
+                .exists()
+            )
             students_q = (
                 select(User)
                 .join(Enrollment, Enrollment.user_id == User.id)
@@ -80,6 +94,7 @@ async def _fetch_eligible_pairs() -> list[tuple[uuid.UUID, uuid.UUID, datetime, 
                     Enrollment.course_id == course.id,
                     User.role == UserRole.student,
                     ~active_session_exists,
+                    has_consent,
                 )
             )
             students = list((await db.execute(students_q)).scalars().all())
