@@ -259,7 +259,7 @@ Admins are users with `role=admin`, created with the operator CLI (`python -m ap
 **Request:** `{"course_id": "uuid"}`
 **Behavior:** Selects a random disease from the course's released-unit pool, creates an `active` session, and calls the LLM to generate the patient's opening message. A student may have at most one active session per course (enforced by a partial unique index).
 **Response (201):** `SessionOut` with a single patient message.
-**Errors:** 401 unauthenticated, 403 not a student, 404 not enrolled in course, 409 active session already exists for this course, 422 no diseases in the course pool, 502 LLM returned an empty response
+**Errors:** 401 unauthenticated, 403 not a student, 404 not enrolled in course, 409 active session already exists for this course, 422 no diseases in the course pool, or `{"code": "NO_NEW_CASES"}` when the student has already had a case for every disorder in the released units (each disorder is assigned once per student), 502 LLM returned an empty response
 
 ### GET /api/v1/sessions/active
 **Role required:** student

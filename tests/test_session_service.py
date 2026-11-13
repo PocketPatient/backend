@@ -131,6 +131,62 @@ async def test_create_new_session_raises_if_no_disease_pool(db_session, setup):
     assert exc_info.value.status_code == 422
 
 
+async def _seen(db_session, stu, course, disease):
+    db_session.add(Session(
+        disease_id=disease.id, user_id=stu.id, course_id=course.id,
+        started_at=datetime.now(timezone.utc), status=SessionStatus.diagnosed,
+    ))
+    await db_session.commit()
+
+
+async def test_create_new_session_skips_disorders_the_student_has_seen(db_session, setup):
+    _, stu, course, seen = setup
+    unseen = Disease(
+        unit_id=seen.unit_id, name="MDD", category="Mood",
+        key_symptoms=["low mood"], differentials=["GAD"],
+        difficulty_tier=2, speech_style="flat", nudge_behavior=_NUDGE,
+    )
+    db_session.add(unseen)
+    await db_session.commit()
+    await _seen(db_session, stu, course, seen)
+
+    from app.services.session_service import create_new_session
+    for _ in range(5):  # random choice: repeat so a lucky pick can't pass
+        with patch("app.services.session_service.gateway") as mock_gw:
+            mock_gw.generate_opening_message = AsyncMock(return_value="Hello doctor.")
+            session, _ = await create_new_session(stu.id, course.id, db_session)
+        assert session.disease_id == unseen.id
+        await db_session.delete(session)
+        await db_session.commit()
+
+
+async def test_create_new_session_raises_when_every_disorder_was_seen(db_session, setup):
+    _, stu, course, disease = setup
+    await _seen(db_session, stu, course, disease)
+
+    from fastapi import HTTPException
+    from app.services.session_service import NO_NEW_CASES, create_new_session
+    with pytest.raises(HTTPException) as exc_info:
+        await create_new_session(stu.id, course.id, db_session)
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == NO_NEW_CASES
+
+
+async def test_seen_disorders_are_per_student(db_session, setup):
+    prof, stu, course, disease = setup
+    other = User(google_uid="svc-stu2", email="svc-stu2@test.edu",
+                 role=UserRole.student, is_verified=True)
+    db_session.add(other)
+    await db_session.flush()
+    await _seen(db_session, other, course, disease)
+
+    from app.services.session_service import create_new_session
+    with patch("app.services.session_service.gateway") as mock_gw:
+        mock_gw.generate_opening_message = AsyncMock(return_value="Hello doctor.")
+        session, _ = await create_new_session(stu.id, course.id, db_session)
+    assert session.disease_id == disease.id
+
+
 async def test_only_one_active_session_per_user_course(db_session, setup):
     from sqlalchemy.exc import IntegrityError
 

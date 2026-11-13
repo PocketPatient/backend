@@ -60,6 +60,11 @@ async def _avg_student_latency_sql(session_id: uuid.UUID, db: AsyncSession) -> f
     return float(avg) if avg is not None else None
 
 
+# 422 detail code: the student has already had every disorder in the released
+# units; the next case comes when the professor releases another unit.
+NO_NEW_CASES = "NO_NEW_CASES"
+
+
 async def _get_disease_pool(course_id: uuid.UUID, db: AsyncSession) -> list[Disease]:
     result = await db.execute(
         select(Disease)
@@ -84,7 +89,27 @@ async def create_new_session(
     if not diseases:
         raise HTTPException(status_code=422, detail="No diseases available in the course pool")
 
-    disease = random.choice(diseases)
+    # Each disorder once per student: skip any they've already had a case for.
+    seen = set(
+        (
+            await db.execute(
+                select(Session.disease_id).where(
+                    Session.user_id == user_id, Session.course_id == course_id
+                )
+            )
+        ).scalars()
+    )
+    unseen = [d for d in diseases if d.id not in seen]
+    if not unseen:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "detail": "No new cases: every disorder in the released units has been assigned",
+                "code": NO_NEW_CASES,
+            },
+        )
+
+    disease = random.choice(unseen)
     # Generate the id upfront so the persona (seeded off it) can be persisted on the
     # initial INSERT. patient_identity is seeded off the session UUID, so the persona
     # stored here is identical to the one the bot-reply/nudge tasks regenerate later.

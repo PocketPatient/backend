@@ -220,7 +220,7 @@ async def test_gemini_payloads_exclude_user_identifiers(setup, db_session):
     from app.tasks.bot_reply import _generate_and_send
     from app.tasks.nudge import _maybe_send_nudge
 
-    stu, _, course, _, session = setup
+    stu, _, course, disease, session = setup
     stu.fcm_token = "fcm-secret-device-token"
     await db_session.commit()
     identifiers = [stu.email, stu.google_uid, str(stu.id), stu.display_name, stu.fcm_token]
@@ -244,6 +244,10 @@ async def test_gemini_payloads_exclude_user_identifiers(setup, db_session):
         await _generate_and_send(str(session.id), "task-1")
 
     session.status = SessionStatus.abandoned
+    # A disorder the student hasn't had yet, so a new case can be opened.
+    db_session.add(Disease(unit_id=disease.unit_id, name="MDD", category="Mood",
+                           key_symptoms=["low mood"], differentials=["GAD"], difficulty_tier=2,
+                           speech_style="flat", nudge_behavior=_NUDGE))
     await db_session.commit()
     from app.services.session_service import create_new_session
     with patch("app.services.session_service.gateway") as gw_open:

@@ -210,11 +210,21 @@ async def test_full_case_lifecycle(e2e_harness, professor, student, db_session, 
         select(Session).where(Session.user_id == stu.id, Session.status == SessionStatus.active)
     )).scalar_one_or_none()
     assert active is None
+    # Each disorder is assigned once per student, so the next case needs a
+    # second disorder in the released unit.
+    second = Disease(
+        unit_id=disease.unit_id, name="GAD", category="Anxiety", key_symptoms=["worry"],
+        differentials=["MDD"], difficulty_tier=2, speech_style="anxious",
+        nudge_behavior=disease.nudge_behavior,
+    )
+    db_session.add(second)
+    await db_session.commit()
     initiate_case(str(stu.id), str(course.id))
     new_active = (await db_session.execute(
         select(Session).where(Session.user_id == stu.id, Session.status == SessionStatus.active)
     )).scalar_one()
     assert new_active.id != sess.id
+    assert new_active.disease_id == second.id  # never the disorder already seen
 
 
 def test_speech_style_delay_ranges_and_prompt_wiring():

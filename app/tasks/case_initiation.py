@@ -166,12 +166,17 @@ def initiate_case(user_id: str, course_id: str) -> None:
     try:
         session_id = run_task_async(_check_and_create(user_id, course_id))
     except HTTPException as exc:
-        # Only an empty disease pool (422, raised by create_new_session) is a
-        # routine skip. Any other HTTPException — e.g. a 502 gateway error while
+        # Only an empty disease pool, or a student who has had every disorder
+        # in it (422s raised by create_new_session), is a routine skip. Any other HTTPException — e.g. a 502 gateway error while
         # generating the opening message — must NOT be swallowed as a skip:
         # log it as an error and re-raise so Celery can retry.
         if exc.status_code == 422:
-            logger.warning(
+            # Running out of new disorders is the normal end of a unit.
+            exhausted = (
+                isinstance(exc.detail, dict)
+                and exc.detail.get("code") == session_service.NO_NEW_CASES
+            )
+            (logger.info if exhausted else logger.warning)(
                 "initiate_case: skipping user=%s course=%s — %s",
                 user_id, course_id, exc.detail,
             )
